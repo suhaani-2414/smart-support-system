@@ -1,6 +1,6 @@
 # smart-support-system
 
-Full-stack Smart Support System for your class project.
+Full-stack Smart Support System for the class project.
 
 ## Repository Layout
 
