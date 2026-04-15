@@ -1,5 +1,8 @@
+# smart-support-system
 
-# CS447 Group Project — Support Ticket System Backend
+Full-stack Smart Support System (React + NestJS + PostgreSQL)
+
+## CS447 Group Project — Support Ticket System Backend
 
 ## Authentication & Users Module
 
