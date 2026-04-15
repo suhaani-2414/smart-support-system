@@ -1,29 +1,5 @@
 # smart-support-system
 
-Full-stack Smart Support System for your class project.
-
-## Repository Layout
-
-- `Backend/` — NestJS backend for authentication and users
-- `Frontend` — placeholder for frontend work
-- `Database` — placeholder for database work
-- `project.sql` — SQL-related project artifact already in the repository
-- `projectMachine.py` — existing project script already in the repository
-
-## Backend Setup
-
-From the repository root:
-
-```bash
-cd Backend
-npm install --legacy-peer-deps
-cp .env.example .env
-npm run start:dev
-```
-
-The backend-specific documentation lives in `Backend/README.md`.
-# smart-support-system
-
 Full-stack Smart Support System (React + NestJS + PostgreSQL)
 
 ## CS447 Group Project — Support Ticket System Backend
