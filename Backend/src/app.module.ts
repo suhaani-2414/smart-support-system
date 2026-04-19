@@ -1,28 +1,40 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
-import { User } from './users/user.entity';
+import { TicketsModule } from './tickets/tickets.module';
+import { MessagesModule } from './messages/messages.module';
 
 @Module({
   imports: [
-    // Load environment variables from .env
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      cache: true,
+    }),
 
-    // SQLite database — swap driver/options for PostgreSQL/MySQL in production
-    TypeOrmModule.forRoot({
-      type: 'sqlite',
-      database: 'support_system.db',
-      entities: [User],
-      // Set synchronize: false and use migrations in production
-      synchronize: true,
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'postgres',
+        host: config.get<string>('DB_HOST', 'localhost'),
+        port: Number(config.get<string>('DB_PORT', '5432')),
+        username: config.get<string>('DB_USERNAME', 'user'),
+        password: config.get<string>('DB_PASSWORD', 'password'),
+        database: config.get<string>('DB_NAME', 'support_system'),
+        autoLoadEntities: true,
+        synchronize: config.get<string>('NODE_ENV') !== 'production',
+      }),
     }),
 
     AuthModule,
     UsersModule,
+    TicketsModule,
+    MessagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

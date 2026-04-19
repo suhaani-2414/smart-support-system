@@ -32,7 +32,7 @@ export class AuthService {
     });
 
     // Omit password from the returned object
-    const { ...result } = user;
+    const { password, ...result } = user;
     return result;
   }
 

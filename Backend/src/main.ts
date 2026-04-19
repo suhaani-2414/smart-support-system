@@ -1,23 +1,31 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enforce DTO validation globally and strip unknown fields
+  app.enableCors({
+    origin: ["http://localhost:5173"],
+    methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,       // Strip properties not in DTO
-      forbidNonWhitelisted: true, // Reject requests with extra fields
-      transform: true,       // Auto-transform payloads to DTO instances
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
     }),
   );
 
-  // Global API prefix so all routes are under /api/v1/...
   app.setGlobalPrefix('api/v1');
+
+  const configService = app.get(ConfigService);
+  const port = Number(configService.get<string>('PORT', '3000'));
 
   await app.listen(process.env.PORT ?? 3000);
   console.log(`Application is running on: ${await app.getUrl()}`);
 }
+
 bootstrap();

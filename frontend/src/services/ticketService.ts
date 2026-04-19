@@ -1,156 +1,168 @@
+import type { AuthUser } from "./authService";
+import { api } from "./api";
+
+export type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED";
+export type TicketPriority = "LOW" | "MEDIUM" | "HIGH";
+
+interface BackendUserSummary {
+  id: number;
+  name: string;
+  email: string;
+}
+
+interface BackendTicket {
+  id: number;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  user: BackendUserSummary;
+  agent: BackendUserSummary | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface BackendStatusHistory {
+  id: number;
+  oldStatus: string;
+  newStatus: string;
+  changedAt: string;
+}
+
 export interface Ticket {
   id: string;
   subject: string;
-  description: string; // Added description
-  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
-  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  description: string;
+  status: TicketStatus;
+  priority: TicketPriority;
   createdAt: string;
   assignedAgent: string | null;
-}
-
-export interface Message {
-  id: string;
-  senderName: string;
-  senderRole: string;
-  content: string;
-  timestamp: string;
+  requesterId: number;
+  requesterName: string;
+  agentId: number | null;
 }
 
 export interface StatusHistory {
   id: string;
   oldStatus: string;
   newStatus: string;
-  changedBy: string;
+  changedBy: string | null;
   timestamp: string;
 }
 
 export interface NewTicketData {
   subject: string;
   description: string;
-  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  priority: TicketPriority;
   category: string;
 }
 
-// --- MOCK DATA STORAGES ---
-// We use simple variables to hold state in memory while the app runs
-const mockTickets: Ticket[] = [
-  { id: '1021', subject: 'Login not working', description: 'I keep getting a 500 error when trying to log in.', status: 'OPEN', priority: 'HIGH', createdAt: '2026-04-14', assignedAgent: null },
-  { id: '1020', subject: 'Payment issue', description: 'My credit card was charged twice for the monthly subscription.', status: 'IN_PROGRESS', priority: 'MEDIUM', createdAt: '2026-04-13', assignedAgent: 'Agent Smith' },
-];
+function mapTicket(ticket: BackendTicket): Ticket {
+  return {
+    id: String(ticket.id),
+    subject: ticket.title,
+    description: ticket.description,
+    status: ticket.status,
+    priority: "MEDIUM", // temporary compatibility fallback
+    createdAt: ticket.createdAt,
+    assignedAgent: ticket.agent?.name ?? null,
+    requesterId: ticket.user.id,
+    requesterName: ticket.user.name,
+    agentId: ticket.agent?.id ?? null,
+  };
+}
 
-const mockMessages: Record<string, Message[]> = {
-  '1020': [
-    { id: 'm1', senderName: 'Jane Doe', senderRole: 'USER', content: 'Can you please look into this double charge?', timestamp: '2026-04-13 10:00 AM' },
-    { id: 'm2', senderName: 'Agent Smith', senderRole: 'AGENT', content: 'Looking into this now. I will process a refund for the duplicate charge.', timestamp: '2026-04-13 10:15 AM' }
-  ]
-};
+function mapHistory(history: BackendStatusHistory): StatusHistory {
+  return {
+    id: String(history.id),
+    oldStatus: history.oldStatus,
+    newStatus: history.newStatus,
+    changedBy: null, // backend does not currently store actor on history rows
+    timestamp: history.changedAt,
+  };
+}
 
-const mockHistory: Record<string, StatusHistory[]> = {
-  '1020': [
-    { id: 'h1', oldStatus: 'OPEN', newStatus: 'IN_PROGRESS', changedBy: 'Agent Smith', timestamp: '2026-04-13 10:14 AM' }
-  ]
-};
+async function getAllTickets(): Promise<Ticket[]> {
+  const response = await api.get<BackendTicket[]>("/tickets");
+  return response.data.map(mapTicket);
+}
 
-// --- API SERVICE ---
-export const ticketService = {
-  getMyTickets: async (): Promise<Ticket[]> => {
-    await new Promise(resolve => setTimeout(resolve, 300)); 
-    return [...mockTickets];
-  },
+async function getVisibleTickets(viewer: Pick<AuthUser, "id" | "role">): Promise<Ticket[]> {
+  const tickets = await getAllTickets();
 
-  getTicketById: async (id: string): Promise<Ticket | undefined> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    return mockTickets.find(t => t.id === id);
-  },
-
-  getTicketMessages: async (id: string): Promise<Message[]> => {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    return mockMessages[id] || [];
-  },
-
-  getTicketHistory: async (id: string): Promise<StatusHistory[]> => {
-    await new Promise(resolve => setTimeout(resolve, 200));
-    return mockHistory[id] || [];
-  },
-
-  postMessage: async (ticketId: string, content: string, role: string): Promise<Message> => {
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const newMessage: Message = {
-      id: Math.random().toString(),
-      senderName: role === 'USER' ? 'Current User' : 'Current Agent',
-      senderRole: role,
-      content,
-      timestamp: new Date().toLocaleString()
-    };
-    if (!mockMessages[ticketId]) mockMessages[ticketId] = [];
-    mockMessages[ticketId].push(newMessage);
-    return newMessage;
-  },
-
-  updateTicketStatus: async (ticketId: string, newStatus: Ticket['status'], changedBy: string): Promise<void> => {
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const ticket = mockTickets.find(t => t.id === ticketId);
-    if (ticket) {
-      const oldStatus = ticket.status;
-      ticket.status = newStatus;
-      
-      // Add to history
-      if (!mockHistory[ticketId]) mockHistory[ticketId] = [];
-      mockHistory[ticketId].push({
-        id: Math.random().toString(),
-        oldStatus,
-        newStatus,
-        changedBy,
-        timestamp: new Date().toLocaleString()
-      });
-    }
-  },
-
-  createTicket: async (data: NewTicketData): Promise<Ticket> => {
-    await new Promise(resolve => setTimeout(resolve, 600)); 
-    const newTicket: Ticket = {
-      id: Math.floor(1000 + Math.random() * 9000).toString(),
-      subject: data.subject,
-      description: data.description,
-      status: 'OPEN',
-      priority: data.priority,
-      createdAt: new Date().toISOString().split('T')[0],
-      assignedAgent: null,
-    };
-    mockTickets.unshift(newTicket); // Add to top of list
-    return newTicket;
-  },
-
-  // AGENT ENDPOINTS
-  getAssignedTickets: async (agentName: string): Promise<Ticket[]> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    // Filter tickets assigned to this agent
-    return mockTickets.filter(t => t.assignedAgent === agentName);
-  },
-
-  getUnassignedTickets: async (): Promise<Ticket[]> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    // Filter tickets with no assigned agent
-    return mockTickets.filter(t => t.assignedAgent === null);
-  },
-
-  assignTicketToSelf: async (ticketId: string, agentName: string): Promise<void> => {
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const ticket = mockTickets.find(t => t.id === ticketId);
-    if (ticket) {
-      const oldStatus = ticket.status;
-      ticket.assignedAgent = agentName;
-      ticket.status = 'IN_PROGRESS'; // Automatically update status when accepted
-      
-      // Log it in history
-      if (!mockHistory[ticketId]) mockHistory[ticketId] = [];
-      mockHistory[ticketId].push({
-        id: Math.random().toString(),
-        oldStatus,
-        newStatus: 'IN_PROGRESS',
-        changedBy: agentName,
-        timestamp: new Date().toLocaleString()
-      });
-    }
+  if (viewer.role === "ADMIN") {
+    return tickets;
   }
+
+  if (viewer.role === "AGENT") {
+    return tickets.filter(
+      (ticket) => ticket.agentId === viewer.id || ticket.agentId === null
+    );
+  }
+
+  return tickets.filter((ticket) => ticket.requesterId === viewer.id);
+}
+
+async function getTicketById(id: string): Promise<Ticket> {
+  const response = await api.get<BackendTicket>(`/tickets/${id}`);
+  return mapTicket(response.data);
+}
+
+async function createTicket(input: NewTicketData): Promise<Ticket> {
+  const payload = {
+    title: input.subject,
+    description: input.description,
+  };
+
+  const response = await api.post<BackendTicket>("/tickets", payload);
+  return mapTicket(response.data);
+}
+
+async function updateTicketStatus(
+  ticketId: string,
+  status: TicketStatus
+): Promise<Ticket> {
+  const response = await api.patch<BackendTicket>(`/tickets/${ticketId}/status`, {
+    status,
+  });
+
+  return mapTicket(response.data);
+}
+
+async function assignTicket(ticketId: string, agentId: number): Promise<Ticket> {
+  const response = await api.patch<BackendTicket>(`/tickets/${ticketId}/assign`, {
+    agentId,
+  });
+
+  return mapTicket(response.data);
+}
+
+async function getTicketHistory(ticketId: string): Promise<StatusHistory[]> {
+  const response = await api.get<BackendStatusHistory[]>(
+    `/tickets/${ticketId}/history`
+  );
+
+  return response.data.map(mapHistory);
+}
+
+async function getAgentWorkspace(agentId: number): Promise<{
+  assigned: Ticket[];
+  unassigned: Ticket[];
+}> {
+  const tickets = await getAllTickets();
+
+  return {
+    assigned: tickets.filter((ticket) => ticket.agentId === agentId),
+    unassigned: tickets.filter((ticket) => ticket.agentId === null),
+  };
+}
+
+export const ticketService = {
+  getAllTickets,
+  getVisibleTickets,
+  getTicketById,
+  createTicket,
+  updateTicketStatus,
+  assignTicket,
+  getTicketHistory,
+  getAgentWorkspace,
 };

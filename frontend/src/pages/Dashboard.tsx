@@ -1,20 +1,15 @@
-import UserDashboard from './dashboards/UserDashboard';
-import AgentDashboard from './dashboards/AgentDashboard';
-import AdminDashboard from './dashboards/AdminDashboard';
+import UserDashboard from "./dashboards/UserDashboard";
+import AgentDashboard from "./dashboards/AgentDashboard";
+import AdminDashboard from "./dashboards/AdminDashboard";
+import { useAuth } from "../hooks/useAuth";
 
 export default function Dashboard() {
-  // 1. Get the role from storage
-  const role = localStorage.getItem('userRole');
+  const { user } = useAuth();
 
-  // 2. Strict conditional rendering
-  if (role === 'ADMIN') {
-    return <AdminDashboard />;
-  }
-  
-  if (role === 'AGENT') {
-    return <AgentDashboard />;
-  }
+  if (!user) return null;
 
-  // Default to User for any other case
+  if (user.role === "ADMIN") return <AdminDashboard />;
+  if (user.role === "AGENT") return <AgentDashboard />;
+
   return <UserDashboard />;
 }

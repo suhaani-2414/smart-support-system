@@ -145,3 +145,17 @@ footer {
   outline: none;
   border-color: #3b82f6;
 }
+
+.auth-secondary-button {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  background: transparent;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.auth-secondary-button:hover {
+  background: #374151;
+}

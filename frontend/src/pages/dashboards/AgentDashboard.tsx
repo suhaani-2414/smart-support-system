@@ -1,142 +1,200 @@
-import { useState, useEffect } from 'react';
-import TicketCard from '../../components/TicketCard';
-import { ticketService, type Ticket } from '../../services/ticketService';
+import { useEffect, useMemo, useState } from "react";
+import TicketCard from "../../components/TicketCard";
+import { ticketService, type Ticket } from "../../services/ticketService";
+import { useAuth } from "../../hooks/useAuth";
 
 export default function AgentDashboard() {
-  // We use a hardcoded agent name for the mock. In Sprint 3, this comes from your JWT token.
-  const currentAgentName = 'Agent Smith'; 
+  const { user } = useAuth();
 
-  const [assignedTickets, setAssignedTickets] = useState<Ticket[]>([]);
-  const [unassignedTickets, setUnassignedTickets] = useState<Ticket[]>([]);
+  const [allTickets, setAllTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Tab state: 'ASSIGNED' or 'QUEUE'
-  const [activeTab, setActiveTab] = useState<'ASSIGNED' | 'QUEUE'>('ASSIGNED');
+  const [error, setError] = useState<string>("");
 
-  const fetchAgentData = async () => {
-    setLoading(true);
-    try {
-      const [assigned, unassigned] = await Promise.all([
-        ticketService.getAssignedTickets(currentAgentName),
-        ticketService.getUnassignedTickets()
-      ]);
-      setAssignedTickets(assigned);
-      setUnassignedTickets(unassigned);
-    } catch (error) {
-      console.error("Error fetching agent data", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "OPEN" | "IN_PROGRESS" | "RESOLVED">("ALL");
 
   useEffect(() => {
-    fetchAgentData();
-  }, []);
+    async function fetchAgentData() {
+      if (!user) return;
 
-  // Handle Accept Ticket Workflow
-  const handleAcceptTicket = async (ticketId: string) => {
-    try {
-      await ticketService.assignTicketToSelf(ticketId, currentAgentName);
-      alert(`Ticket #${ticketId} accepted successfully!`);
-      // Refresh the data so it moves from Queue to Assigned
-      fetchAgentData();
-      setActiveTab('ASSIGNED'); // Switch user to their assigned tab
-    } catch (error) {
-      alert("Failed to accept ticket.");
+      try {
+        setLoading(true);
+        setError("");
+
+        // Use the real backend tickets response only.
+        const tickets = await ticketService.getAllTickets();
+        setAllTickets(tickets);
+      } catch (err) {
+        console.error(err);
+        setError("Failed to load tickets for the agent dashboard.");
+      } finally {
+        setLoading(false);
+      }
     }
-  };
 
-  if (loading) return <p style={{ color: '#9ca3af', padding: '2rem' }}>Loading agent workspace...</p>;
+    fetchAgentData();
+  }, [user]);
+
+  const assignedTickets = useMemo(() => {
+    if (!user) return [];
+
+    return allTickets.filter((ticket) => {
+      const agentIdMatches =
+        typeof ticket.agentId === "number" && ticket.agentId === user.id;
+
+      const agentNameMatches =
+        typeof ticket.assignedAgent === "string" &&
+        ticket.assignedAgent.trim().length > 0 &&
+        ticket.assignedAgent.toLowerCase() === user.name.toLowerCase();
+
+      return agentIdMatches || agentNameMatches;
+    });
+  }, [allTickets, user]);
+
+  const unassignedTickets = useMemo(() => {
+    return allTickets.filter((ticket) => ticket.agentId === null);
+  }, [allTickets]);
+
+  const filteredAssignedTickets = useMemo(() => {
+    return assignedTickets.filter((ticket) => {
+      const matchesSearch =
+        ticket.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ticket.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ticket.id.toString().includes(searchTerm);
+
+      const matchesStatus =
+        statusFilter === "ALL" || ticket.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [assignedTickets, searchTerm, statusFilter]);
+
+  const filteredUnassignedTickets = useMemo(() => {
+    return unassignedTickets.filter((ticket) => {
+      const matchesSearch =
+        ticket.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ticket.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ticket.id.toString().includes(searchTerm);
+
+      const matchesStatus =
+        statusFilter === "ALL" || ticket.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [unassignedTickets, searchTerm, statusFilter]);
+
+  if (!user) {
+    return null;
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      
-      {/* 1. Header & Stats Row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Agent Workspace</h2>
-          <p style={{ color: '#9ca3af', margin: '0.25rem 0 0 0' }}>Welcome back, {currentAgentName}</p>
+    <div>
+      <div className="card">
+        <h2>Agent Dashboard</h2>
+        <p>
+          Welcome back, <strong>{user.name}</strong>.
+        </p>
+        <p>
+          Use this workspace to review assigned tickets, claim unassigned tickets, and track current support activity.
+        </p>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: "1rem",
+          flexWrap: "wrap",
+          margin: "1rem 0",
+        }}
+      >
+        <div className="card" style={{ minWidth: "180px" }}>
+          <h3>Assigned</h3>
+          <p>{assignedTickets.length}</p>
         </div>
-        
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <div className="card" style={{ padding: '1rem', minWidth: '120px', textAlign: 'center' }}>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#3b82f6' }}>{assignedTickets.length}</div>
-            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>My Active Tickets</div>
-          </div>
-          <div className="card" style={{ padding: '1rem', minWidth: '120px', textAlign: 'center' }}>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#10b981' }}>{unassignedTickets.length}</div>
-            <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>Unassigned Queue</div>
-          </div>
+
+        <div className="card" style={{ minWidth: "180px" }}>
+          <h3>Unassigned</h3>
+          <p>{unassignedTickets.length}</p>
+        </div>
+
+        <div className="card" style={{ minWidth: "180px" }}>
+          <h3>Total Current Tickets</h3>
+          <p>{allTickets.length}</p>
         </div>
       </div>
 
-      {/* 2. Tabs Navigation */}
-      <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid #374151', paddingBottom: '0.5rem' }}>
-        <button 
-          onClick={() => setActiveTab('ASSIGNED')}
-          style={{ 
-            background: 'none', border: 'none', fontSize: '1rem', cursor: 'pointer',
-            color: activeTab === 'ASSIGNED' ? '#3b82f6' : '#9ca3af',
-            fontWeight: activeTab === 'ASSIGNED' ? 'bold' : 'normal',
-            borderBottom: activeTab === 'ASSIGNED' ? '2px solid #3b82f6' : 'none',
-            paddingBottom: '0.5rem'
-          }}
+      <div
+        className="card"
+        style={{
+          display: "flex",
+          gap: "1rem",
+          flexWrap: "wrap",
+          marginBottom: "1rem",
+        }}
+      >
+        <input
+          type="text"
+          className="form-input"
+          placeholder="Search ticket title, description, or ID..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{ flex: "1 1 280px" }}
+        />
+
+        <select
+          className="form-input"
+          value={statusFilter}
+          onChange={(e) =>
+            setStatusFilter(
+              e.target.value as "ALL" | "OPEN" | "IN_PROGRESS" | "RESOLVED"
+            )
+          }
+          style={{ flex: "0 0 200px" }}
         >
-          Assigned to Me
-        </button>
-        <button 
-          onClick={() => setActiveTab('QUEUE')}
-          style={{ 
-            background: 'none', border: 'none', fontSize: '1rem', cursor: 'pointer',
-            color: activeTab === 'QUEUE' ? '#10b981' : '#9ca3af',
-            fontWeight: activeTab === 'QUEUE' ? 'bold' : 'normal',
-            borderBottom: activeTab === 'QUEUE' ? '2px solid #10b981' : 'none',
-            paddingBottom: '0.5rem'
-          }}
-        >
-          Ticket Queue ({unassignedTickets.length})
-        </button>
+          <option value="ALL">All statuses</option>
+          <option value="OPEN">Open</option>
+          <option value="IN_PROGRESS">In Progress</option>
+          <option value="RESOLVED">Resolved</option>
+        </select>
       </div>
 
-      {/* 3. Tab Content */}
-      <div className="ticket-list">
-        {activeTab === 'ASSIGNED' && (
-          assignedTickets.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', color: '#9ca3af' }}>
-              You have no assigned tickets. Great job!
-            </div>
-          ) : (
-            assignedTickets.map(ticket => (
-              <TicketCard key={ticket.id} ticket={ticket} />
-            ))
-          )
-        )}
-
-        {activeTab === 'QUEUE' && (
-          unassignedTickets.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', color: '#9ca3af' }}>
-              The queue is empty.
-            </div>
-          ) : (
-            unassignedTickets.map(ticket => (
-              <div key={ticket.id} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                {/* Wrap the TicketCard in a div to give it flex properties alongside the button */}
-                <div style={{ flex: 1 }}>
-                  <TicketCard ticket={ticket} />
-                </div>
-                <button 
-                  className="button" 
-                  style={{ backgroundColor: '#10b981', height: 'fit-content', whiteSpace: 'nowrap' }}
-                  onClick={() => handleAcceptTicket(ticket.id)}
-                >
-                  Accept Ticket
-                </button>
+      {loading ? (
+        <div className="card">
+          <p>Loading agent workspace...</p>
+        </div>
+      ) : error ? (
+        <div className="card" style={{ color: "#ef4444" }}>
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <h3>Assigned Tickets</h3>
+            {filteredAssignedTickets.length > 0 ? (
+              <div style={{ display: "grid", gap: "1rem" }}>
+                {filteredAssignedTickets.map((ticket) => (
+                  <TicketCard key={ticket.id} ticket={ticket} />
+                ))}
               </div>
-            ))
-          )
-        )}
-      </div>
+            ) : (
+              <p>No assigned tickets match the current filters.</p>
+            )}
+          </div>
 
+          <div className="card" style={{ marginTop: "1rem" }}>
+            <h3>Unassigned Tickets</h3>
+            {filteredUnassignedTickets.length > 0 ? (
+              <div style={{ display: "grid", gap: "1rem" }}>
+                {filteredUnassignedTickets.map((ticket) => (
+                  <TicketCard key={ticket.id} ticket={ticket} />
+                ))}
+              </div>
+            ) : (
+              <p>No unassigned tickets match the current filters.</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

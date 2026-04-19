@@ -12,6 +12,7 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { User } from '../users/user.entity';
+import { Role } from '../users/enums/role.enum';
 
 @Injectable()
 export class TicketsService {
@@ -95,6 +96,14 @@ export class TicketsService {
 
     if (!agent) {
       throw new NotFoundException('Agent not found');
+    }
+
+    if (agent.role !== Role.AGENT) {
+      throw new BadRequestException('Assigned user must have AGENT role');
+    }
+
+    if (!agent.isActive) {
+      throw new BadRequestException('Cannot assign an inactive agent');
     }
 
     ticket.agent = agent;

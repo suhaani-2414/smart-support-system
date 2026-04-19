@@ -1,10 +1,11 @@
 import {
+  Body,
   Controller,
   Post,
-  Body,
   Get,
   Param,
   Patch,
+  ParseIntPipe,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -23,37 +24,41 @@ export class TicketsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  create(@Body() dto: CreateTicketDto, @Request() req: { user: { id: number } }) {
-    return this.ticketsService.create(dto, req.user.id);
-  }
-
-  @Get()
-  findAll() {
-    return this.ticketsService.findAll();
+  create(
+    @Body() dto: CreateTicketDto,
+    @Request() req: { user: { sub: number } }
+  ) {
+    return this.ticketsService.create(dto, req.user.sub);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.ticketsService.findOne(Number(id));
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.ticketsService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateTicketDto) {
-    return this.ticketsService.update(Number(id), dto);
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTicketDto) {
+    return this.ticketsService.update(id, dto);
   }
 
   @Patch(':id/assign')
-  assign(@Param('id') id: string, @Body() dto: AssignTicketDto) {
-    return this.ticketsService.assign(Number(id), dto);
+  assign(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignTicketDto,
+  ) {
+    return this.ticketsService.assign(id, dto);
   }
 
   @Patch(':id/status')
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateTicketStatusDto) {
-    return this.ticketsService.updateStatus(Number(id), dto);
+  updateStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTicketStatusDto,
+  ) {
+    return this.ticketsService.updateStatus(id, dto);
   }
 
   @Get(':id/history')
-  getHistory(@Param('id') id: string) {
-    return this.ticketsService.getHistory(Number(id));
+  getHistory(@Param('id', ParseIntPipe) id: number) {
+    return this.ticketsService.getHistory(id);
   }
 }
