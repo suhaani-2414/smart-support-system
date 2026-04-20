@@ -39,8 +39,8 @@ interface LoginResponse {
   accessToken: string;
 }
 
-function normalizeRole(role: string): UserRole {
-  const value = role.toUpperCase();
+export function normalizeRole(role: string | undefined): UserRole {
+  const value = (role ?? "USER").toUpperCase();
   if (value === "ADMIN" || value === "AGENT") {
     return value;
   }
@@ -97,7 +97,6 @@ export async function register(
 ): Promise<{ accessToken: string; user: AuthUser }> {
   await api.post("/auth/signup", payload);
 
-  // Auto-login after successful signup.
   return login({
     email: payload.email,
     password: payload.password,

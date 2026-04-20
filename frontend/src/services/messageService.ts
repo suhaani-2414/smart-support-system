@@ -1,20 +1,19 @@
-import type { UserRole } from "./authService";
 import { api } from "./api";
+import { normalizeRole, type UserRole } from "./authService";
 
 interface BackendMessage {
-  id: string;
-  ticketId: string;
-  senderId: string;
-  senderRole: "user" | "agent";
+  id: number;
+  ticket?: {
+    id: number;
+  } | null;
+  sender?: {
+    id: number;
+    name: string;
+    role: string;
+  } | null;
+  senderRole?: string;
   content: string;
   createdAt: string;
-}
-
-interface BackendAgentReply {
-  ticketId: string;
-  content: string;
-  agentId: string;
-  timestamp: string;
 }
 
 export interface TicketMessage {
@@ -22,7 +21,7 @@ export interface TicketMessage {
   ticketId: string;
   senderId: string;
   senderName: string;
-  senderRole: "USER" | "AGENT";
+  senderRole: UserRole;
   content: string;
   timestamp: string;
 }
@@ -35,57 +34,38 @@ export interface SendMessageInput {
   senderName?: string;
 }
 
-function mapMessage(message: BackendMessage): TicketMessage {
+function mapMessage(
+  message: BackendMessage,
+  fallbackTicketId: string
+): TicketMessage {
+  const senderRole = normalizeRole(message.senderRole ?? message.sender?.role);
+
   return {
-    id: message.id,
-    ticketId: message.ticketId,
-    senderId: message.senderId,
-    senderName: message.senderRole === "agent" ? "Support Agent" : "User",
-    senderRole: message.senderRole === "agent" ? "AGENT" : "USER",
+    id: String(message.id),
+    ticketId: String(message.ticket?.id ?? fallbackTicketId),
+    senderId: String(message.sender?.id ?? ""),
+    senderName:
+      message.sender?.name ??
+      (senderRole === "USER" ? "User" : "Support Agent"),
+    senderRole,
     content: message.content,
     timestamp: message.createdAt,
   };
 }
 
-function mapAgentReply(reply: BackendAgentReply): TicketMessage {
-  return {
-    id: `${reply.ticketId}-${reply.timestamp}`,
-    ticketId: reply.ticketId,
-    senderId: reply.agentId,
-    senderName: "Support Agent",
-    senderRole: "AGENT",
-    content: reply.content,
-    timestamp: reply.timestamp,
-  };
-}
-
 async function getTicketMessages(ticketId: string): Promise<TicketMessage[]> {
   const response = await api.get<BackendMessage[]>(`/messages/${ticketId}`);
-  return response.data.map(mapMessage);
+  return response.data.map((message) => mapMessage(message, ticketId));
 }
 
 async function sendMessage(input: SendMessageInput): Promise<TicketMessage> {
-  if (input.senderRole === "AGENT" || input.senderRole === "ADMIN") {
-    // Current backend has a separate agent reply endpoint, but it does not
-    // appear to persist into /messages history yet.
-    const response = await api.post<BackendAgentReply>(
-      `/agent/tickets/${input.ticketId}/reply`,
-      {
-        content: input.content,
-        agentId: String(input.senderId),
-      }
-    );
-
-    return mapAgentReply(response.data);
-  }
-
   const response = await api.post<BackendMessage>("/messages", {
-    ticketId: input.ticketId,
+    ticketId: Number(input.ticketId),
+    senderId: input.senderId,
     content: input.content,
-    senderId: String(input.senderId),
   });
 
-  return mapMessage(response.data);
+  return mapMessage(response.data, input.ticketId);
 }
 
 export const messageService = {

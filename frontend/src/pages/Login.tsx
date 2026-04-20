@@ -1,7 +1,7 @@
-import { FormEvent, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { authService } from "../services/authService";
+import { useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { getApiErrorMessage } from "../services/api";
 
 type LoginRole = "user" | "agent" | "admin";
 
@@ -10,7 +10,7 @@ type LoginFormState = {
   password: string;
 };
 
-type LocationState = {
+type RedirectState = {
   from?: {
     pathname?: string;
   };
@@ -23,13 +23,11 @@ const roleLabels: Record<LoginRole, string> = {
 };
 
 function getDemoCredentials(role: LoginRole): LoginFormState {
+  const env = import.meta.env as Record<string, string | undefined>;
+
   return {
-    email:
-      import.meta.env[`VITE_DEMO_${role.toUpperCase()}_EMAIL` as keyof ImportMetaEnv] ||
-      "",
-    password:
-      import.meta.env[`VITE_DEMO_${role.toUpperCase()}_PASSWORD` as keyof ImportMetaEnv] ||
-      "",
+    email: env[`VITE_DEMO_${role.toUpperCase()}_EMAIL`] ?? "",
+    password: env[`VITE_DEMO_${role.toUpperCase()}_PASSWORD`] ?? "",
   };
 }
 
@@ -42,105 +40,104 @@ export default function Login() {
     email: "",
     password: "",
   });
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const state = location.state as LocationState | null;
-  const redirectTo = state?.from?.pathname ?? "/dashboard";
+  const redirectTo = useMemo(() => {
+    const state = location.state as RedirectState | null;
+    return state?.from?.pathname ?? "/dashboard";
+  }, [location.state]);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setLoading(true);
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
     setError("");
 
     try {
-      const result = await authService.login(form.email.trim(), form.password);
-      const me = await authService.getMe(result.accessToken);
-
-      login({
-        user: me,
-        accessToken: result.accessToken,
+      await login({
+        email: form.email.trim(),
+        password: form.password,
       });
 
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      setError("Login failed. Check your credentials and try again.");
-      console.error(err);
+      setError(
+        getApiErrorMessage(
+          err,
+          "Login failed. Check your credentials and try again."
+        )
+      );
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
   async function handleQuickLogin(role: LoginRole) {
-    const creds = getDemoCredentials(role);
+    const credentials = getDemoCredentials(role);
 
-    if (!creds.email || !creds.password) {
+    if (!credentials.email || !credentials.password) {
       setError(
-        `Missing demo credentials for ${roleLabels[role]}. Add VITE_DEMO_${role.toUpperCase()}_EMAIL and VITE_DEMO_${role.toUpperCase()}_PASSWORD to your frontend .env file.`
+        `Missing demo credentials for ${roleLabels[role]}. Add VITE_DEMO_${role.toUpperCase()}_EMAIL and VITE_DEMO_${role.toUpperCase()}_PASSWORD to the frontend .env file.`
       );
       return;
     }
 
-    setForm(creds);
-
-    setLoading(true);
+    setForm(credentials);
+    setSubmitting(true);
     setError("");
 
     try {
-      const result = await authService.login(creds.email, creds.password);
-      const me = await authService.getMe(result.accessToken);
-
-      login({
-        user: me,
-        accessToken: result.accessToken,
-      });
-
+      await login(credentials);
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      setError(`Quick login for ${roleLabels[role]} failed.`);
-      console.error(err);
+      setError(getApiErrorMessage(err, `Quick login for ${roleLabels[role]} failed.`));
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card">
-        <h1 className="auth-title">Smart Support Login</h1>
-        <p className="auth-subtitle">
-          Sign in as a user, agent, or admin to test frontend and backend integration.
+    <div className="login-container">
+      <div className="card login-box">
+        <h2 style={{ textAlign: "center", marginBottom: "1rem" }}>
+          Smart Support Login
+        </h2>
+
+        <p style={{ textAlign: "center", color: "#9ca3af", marginBottom: "1.5rem" }}>
+          Sign in with your account, or use demo credentials for user, agent, and admin testing.
         </p>
 
-        {error ? <div className="auth-banner">{error}</div> : null}
+        {error ? (
+          <div style={{ color: "#ef4444", marginBottom: "1rem" }}>{error}</div>
+        ) : null}
 
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label className="auth-label">
-            Email
-            <input
-              className="auth-input"
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm((current) => ({ ...current, email: e.target.value }))}
-              autoComplete="email"
-              placeholder="name@example.com"
-            />
-          </label>
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: "1rem" }}>
+          <input
+            className="form-input"
+            type="email"
+            autoComplete="email"
+            placeholder="name@example.com"
+            value={form.email}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, email: event.target.value }))
+            }
+            required
+          />
 
-          <label className="auth-label">
-            Password
-            <input
-              className="auth-input"
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm((current) => ({ ...current, password: e.target.value }))}
-              autoComplete="current-password"
-              placeholder="••••••••"
-            />
-          </label>
+          <input
+            className="form-input"
+            type="password"
+            autoComplete="current-password"
+            placeholder="Password"
+            value={form.password}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, password: event.target.value }))
+            }
+            required
+          />
 
-          <button className="auth-button" type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Login"}
+          <button className="button" type="submit" disabled={submitting}>
+            {submitting ? "Signing in..." : "Login"}
           </button>
         </form>
 
@@ -149,29 +146,31 @@ export default function Login() {
             type="button"
             className="auth-secondary-button"
             onClick={() => handleQuickLogin("user")}
-            disabled={loading}
+            disabled={submitting}
           >
             Login as User
           </button>
-
           <button
             type="button"
             className="auth-secondary-button"
             onClick={() => handleQuickLogin("agent")}
-            disabled={loading}
+            disabled={submitting}
           >
             Login as Agent
           </button>
-
           <button
             type="button"
             className="auth-secondary-button"
             onClick={() => handleQuickLogin("admin")}
-            disabled={loading}
+            disabled={submitting}
           >
             Login as Admin
           </button>
         </div>
+
+        <p style={{ textAlign: "center", marginTop: "1.5rem" }}>
+          Need an account? <Link to="/register">Create one</Link>
+        </p>
       </div>
     </div>
   );
