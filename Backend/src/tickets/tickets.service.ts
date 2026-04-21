@@ -1,7 +1,8 @@
 import {
+  BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,6 +14,16 @@ import { UpdateTicketStatusDto } from './dto/update-ticket-status.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { User } from '../users/user.entity';
 import { Role } from '../users/enums/role.enum';
+
+type TicketViewer = {
+  sub: number;
+  role: Role;
+};
+
+type TicketListFilters = {
+  status?: TicketStatus;
+  unassigned?: boolean;
+};
 
 @Injectable()
 export class TicketsService {
@@ -26,6 +37,22 @@ export class TicketsService {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
   ) {}
+
+  private buildVisibleTicketQuery(viewer: TicketViewer) {
+    const query = this.ticketRepo
+      .createQueryBuilder('ticket')
+      .leftJoinAndSelect('ticket.user', 'user')
+      .leftJoinAndSelect('ticket.agent', 'agent')
+      .where('1 = 1');
+
+    if (viewer.role === Role.AGENT) {
+      query.andWhere('agent.id = :agentId', { agentId: viewer.sub });
+    } else if (viewer.role === Role.USER) {
+      query.andWhere('user.id = :userId', { userId: viewer.sub });
+    }
+
+    return query;
+  }
 
   async create(dto: CreateTicketDto, userId: number): Promise<Ticket> {
     const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -53,18 +80,29 @@ export class TicketsService {
     return savedTicket;
   }
 
-  async findAll(): Promise<Ticket[]> {
-    return this.ticketRepo.find({
-      relations: ['user', 'agent'],
-      order: { createdAt: 'DESC' },
-    });
+  async findAllVisible(
+    viewer: TicketViewer,
+    filters: TicketListFilters = {},
+  ): Promise<Ticket[]> {
+    const query = this.buildVisibleTicketQuery(viewer);
+
+    if (filters.status) {
+      query.andWhere('ticket.status = :status', { status: filters.status });
+    }
+
+    if (filters.unassigned) {
+      query.andWhere('agent.id IS NULL');
+    }
+
+    query.orderBy('ticket.createdAt', 'DESC');
+
+    return query.getMany();
   }
 
-  async findOne(id: number): Promise<Ticket> {
-    const ticket = await this.ticketRepo.findOne({
-      where: { id },
-      relations: ['user', 'agent'],
-    });
+  async findOneVisible(id: number, viewer: TicketViewer): Promise<Ticket> {
+    const ticket = await this.buildVisibleTicketQuery(viewer)
+      .andWhere('ticket.id = :id', { id })
+      .getOne();
 
     if (!ticket) {
       throw new NotFoundException('Ticket not found');
@@ -73,8 +111,12 @@ export class TicketsService {
     return ticket;
   }
 
-  async update(id: number, dto: UpdateTicketDto): Promise<Ticket> {
-    const ticket = await this.findOne(id);
+  async update(
+    id: number,
+    dto: UpdateTicketDto,
+    viewer: TicketViewer,
+  ): Promise<Ticket> {
+    const ticket = await this.findOneVisible(id, viewer);
 
     if (dto.title !== undefined) {
       ticket.title = dto.title;
@@ -87,8 +129,16 @@ export class TicketsService {
     return this.ticketRepo.save(ticket);
   }
 
-  async assign(id: number, dto: AssignTicketDto): Promise<Ticket> {
-    const ticket = await this.findOne(id);
+  async assign(
+    id: number,
+    dto: AssignTicketDto,
+    viewer: TicketViewer,
+  ): Promise<Ticket> {
+    if (viewer.role !== Role.ADMIN) {
+      throw new ForbiddenException('Only admins can assign tickets');
+    }
+
+    const ticket = await this.findOneVisible(id, viewer);
 
     const agent = await this.userRepo.findOne({
       where: { id: dto.agentId },
@@ -110,8 +160,12 @@ export class TicketsService {
     return this.ticketRepo.save(ticket);
   }
 
-  async updateStatus(id: number, dto: UpdateTicketStatusDto): Promise<Ticket> {
-    const ticket = await this.findOne(id);
+  async updateStatus(
+    id: number,
+    dto: UpdateTicketStatusDto,
+    viewer: TicketViewer,
+  ): Promise<Ticket> {
+    const ticket = await this.findOneVisible(id, viewer);
 
     const oldStatus = ticket.status;
     const newStatus = dto.status;
@@ -132,8 +186,11 @@ export class TicketsService {
     return updatedTicket;
   }
 
-  async getHistory(ticketId: number): Promise<TicketStatusHistory[]> {
-    await this.findOne(ticketId);
+  async getHistory(
+    ticketId: number,
+    viewer: TicketViewer,
+  ): Promise<TicketStatusHistory[]> {
+    await this.findOneVisible(ticketId, viewer);
 
     return this.historyRepo.find({
       where: {

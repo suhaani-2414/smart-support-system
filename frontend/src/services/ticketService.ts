@@ -56,13 +56,18 @@ export interface NewTicketData {
   category: string;
 }
 
+type TicketListOptions = {
+  status?: TicketStatus;
+  unassigned?: boolean;
+};
+
 function mapTicket(ticket: BackendTicket): Ticket {
   return {
     id: String(ticket.id),
     subject: ticket.title,
     description: ticket.description,
     status: ticket.status,
-    priority: "MEDIUM", // temporary compatibility fallback
+    priority: "MEDIUM",
     createdAt: ticket.createdAt,
     assignedAgent: ticket.agent?.name ?? null,
     requesterId: ticket.user.id,
@@ -76,30 +81,33 @@ function mapHistory(history: BackendStatusHistory): StatusHistory {
     id: String(history.id),
     oldStatus: history.oldStatus,
     newStatus: history.newStatus,
-    changedBy: null, // backend does not currently store actor on history rows
+    changedBy: null,
     timestamp: history.changedAt,
   };
 }
 
-async function getAllTickets(): Promise<Ticket[]> {
-  const response = await api.get<BackendTicket[]>("/tickets");
+async function getAllTickets(options: TicketListOptions = {}): Promise<Ticket[]> {
+  const response = await api.get<BackendTicket[]>("/tickets", {
+    params: {
+      ...(options.status ? { status: options.status } : {}),
+      ...(options.unassigned !== undefined
+        ? { unassigned: String(options.unassigned) }
+        : {}),
+    },
+  });
+
   return response.data.map(mapTicket);
 }
 
-async function getVisibleTickets(viewer: Pick<AuthUser, "id" | "role">): Promise<Ticket[]> {
-  const tickets = await getAllTickets();
+async function getVisibleTickets(
+  _viewer: Pick<AuthUser, "id" | "role">,
+  options: TicketListOptions = {}
+): Promise<Ticket[]> {
+  return getAllTickets(options);
+}
 
-  if (viewer.role === "ADMIN") {
-    return tickets;
-  }
-
-  if (viewer.role === "AGENT") {
-    return tickets.filter(
-      (ticket) => ticket.agentId === viewer.id || ticket.agentId === null
-    );
-  }
-
-  return tickets.filter((ticket) => ticket.requesterId === viewer.id);
+async function getPendingTickets(): Promise<Ticket[]> {
+  return getAllTickets({ status: "OPEN", unassigned: true });
 }
 
 async function getTicketById(id: string): Promise<Ticket> {
@@ -144,21 +152,22 @@ async function getTicketHistory(ticketId: string): Promise<StatusHistory[]> {
   return response.data.map(mapHistory);
 }
 
-async function getAgentWorkspace(agentId: number): Promise<{
+async function getAgentWorkspace(_agentId: number): Promise<{
   assigned: Ticket[];
   unassigned: Ticket[];
 }> {
-  const tickets = await getAllTickets();
+  const assigned = await getAllTickets();
 
   return {
-    assigned: tickets.filter((ticket) => ticket.agentId === agentId),
-    unassigned: tickets.filter((ticket) => ticket.agentId === null),
+    assigned,
+    unassigned: [],
   };
 }
 
 export const ticketService = {
   getAllTickets,
   getVisibleTickets,
+  getPendingTickets,
   getTicketById,
   createTicket,
   updateTicketStatus,

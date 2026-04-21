@@ -75,7 +75,7 @@ export default function TicketDetail() {
     }
 
     if (user.role === "AGENT") {
-      return ticket.agentId === null || ticket.agentId === user.id;
+      return ticket.agentId === user.id;
     }
 
     return ticket.requesterId === user.id;
