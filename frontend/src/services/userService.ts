@@ -11,6 +11,7 @@ interface BackendUser {
   email: string;
   role: string;
   isActive: boolean;
+  isPending: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -22,6 +23,7 @@ function mapUser(user: BackendUser): AuthUser {
     email: user.email,
     role: normalizeRole(user.role),
     isActive: user.isActive,
+    isPending: user.isPending,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -41,6 +43,23 @@ async function getUserById(id: number): Promise<AuthUser> {
   return mapUser(response.data);
 }
 
+/** Admin: get all accounts awaiting approval */
+async function getPendingUsers(): Promise<AuthUser[]> {
+  const response = await api.get<BackendUser[]>("/users/pending");
+  return response.data.map(mapUser);
+}
+
+/**
+ * Admin: approve a pending account.
+ * Optionally pass a role to change it before activation.
+ */
+async function approveUser(id: number, role?: UserRole): Promise<AuthUser> {
+  const response = await api.post<BackendUser>(`/users/${id}/approve`, {
+    ...(role ? { role: toBackendRole(role) } : {}),
+  });
+  return mapUser(response.data);
+}
+
 async function updateUserStatus(
   id: number,
   isActive: boolean
@@ -48,7 +67,6 @@ async function updateUserStatus(
   const response = await api.patch<BackendUser>(`/users/${id}/status`, {
     isActive,
   });
-
   return mapUser(response.data);
 }
 
@@ -56,13 +74,14 @@ async function updateUserRole(id: number, role: UserRole): Promise<AuthUser> {
   const response = await api.patch<BackendUser>(`/users/${id}/role`, {
     role: toBackendRole(role),
   });
-
   return mapUser(response.data);
 }
 
 export const userService = {
   getAllUsers,
   getUserById,
+  getPendingUsers,
+  approveUser,
   updateUserStatus,
   updateUserRole,
 };

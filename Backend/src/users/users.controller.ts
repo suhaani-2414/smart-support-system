@@ -4,6 +4,7 @@ import {
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   Body,
   UseGuards,
   Request,
@@ -13,11 +14,15 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from './enums/role.enum';
+import { MailService } from '../mail/mail.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly mailService: MailService,
+  ) {}
 
   /** GET /users/me — any authenticated user can fetch their own profile */
   @Get('me')
@@ -26,7 +31,18 @@ export class UsersController {
   }
 
   /**
-   * GET /users — admin only: list all users with their account status
+   * GET /users/pending — admin only: list all accounts awaiting approval.
+   * Must be declared BEFORE :id to avoid route shadowing.
+   */
+  @Get('pending')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  findPending() {
+    return this.usersService.findPendingUsers();
+  }
+
+  /**
+   * GET /users — admin only: list all users
    */
   @Get()
   @UseGuards(RolesGuard)
@@ -43,6 +59,24 @@ export class UsersController {
   @Roles(Role.ADMIN, Role.AGENT)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.findById(id);
+  }
+
+  /**
+   * POST /users/:id/approve — admin only: approve a pending account.
+   * Body (optional): { role: 'user' | 'agent' | 'admin' }
+   * Sends an approval email to the user.
+   */
+  @Post(':id/approve')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  async approveAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('role') role?: Role,
+  ) {
+    const user = await this.usersService.approveAccount(id, role);
+    // Fire-and-forget — don't block the response on email delivery
+    void this.mailService.sendAccountApproved(user.name, user.email);
+    return user;
   }
 
   /**

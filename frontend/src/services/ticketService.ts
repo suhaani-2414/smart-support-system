@@ -16,7 +16,8 @@ interface BackendTicket {
   description: string;
   status: TicketStatus;
   user: BackendUserSummary;
-  agent: BackendUserSummary | null;
+  /** ManyToMany — array of assigned agents (empty = unassigned) */
+  agents: BackendUserSummary[];
   createdAt: string;
   updatedAt: string;
 }
@@ -28,6 +29,11 @@ interface BackendStatusHistory {
   changedAt: string;
 }
 
+export interface AssignedAgent {
+  id: number;
+  name: string;
+}
+
 export interface Ticket {
   id: string;
   subject: string;
@@ -35,9 +41,13 @@ export interface Ticket {
   status: TicketStatus;
   priority: TicketPriority;
   createdAt: string;
+  /** Primary display name (first assigned agent, or null) */
   assignedAgent: string | null;
+  /** Full list of assigned agents */
+  assignedAgents: AssignedAgent[];
   requesterId: number;
   requesterName: string;
+  /** Convenience: id of first agent (null if unassigned) */
   agentId: number | null;
 }
 
@@ -62,6 +72,7 @@ type TicketListOptions = {
 };
 
 function mapTicket(ticket: BackendTicket): Ticket {
+  const agents = ticket.agents ?? [];
   return {
     id: String(ticket.id),
     subject: ticket.title,
@@ -69,10 +80,11 @@ function mapTicket(ticket: BackendTicket): Ticket {
     status: ticket.status,
     priority: "MEDIUM",
     createdAt: ticket.createdAt,
-    assignedAgent: ticket.agent?.name ?? null,
+    assignedAgent: agents.length > 0 ? agents[0].name : null,
+    assignedAgents: agents.map((a) => ({ id: a.id, name: a.name })),
     requesterId: ticket.user.id,
     requesterName: ticket.user.name,
-    agentId: ticket.agent?.id ?? null,
+    agentId: agents.length > 0 ? agents[0].id : null,
   };
 }
 
@@ -95,7 +107,6 @@ async function getAllTickets(options: TicketListOptions = {}): Promise<Ticket[]>
         : {}),
     },
   });
-
   return response.data.map(mapTicket);
 }
 
@@ -120,7 +131,6 @@ async function createTicket(input: NewTicketData): Promise<Ticket> {
     title: input.subject,
     description: input.description,
   };
-
   const response = await api.post<BackendTicket>("/tickets", payload);
   return mapTicket(response.data);
 }
@@ -132,15 +142,29 @@ async function updateTicketStatus(
   const response = await api.patch<BackendTicket>(`/tickets/${ticketId}/status`, {
     status,
   });
-
   return mapTicket(response.data);
 }
 
-async function assignTicket(ticketId: string, agentId: number): Promise<Ticket> {
+/**
+ * Admin: assign one or multiple agents to a ticket.
+ * Replaces any existing assignment.
+ */
+async function assignTicket(
+  ticketId: string,
+  agentIds: number[]
+): Promise<Ticket> {
   const response = await api.patch<BackendTicket>(`/tickets/${ticketId}/assign`, {
-    agentId,
+    agentIds,
   });
+  return mapTicket(response.data);
+}
 
+/**
+ * Agent: self-assign (claim) an unassigned ticket.
+ * No body required — the server uses the JWT identity.
+ */
+async function selfAssignTicket(ticketId: string): Promise<Ticket> {
+  const response = await api.patch<BackendTicket>(`/tickets/${ticketId}/claim`);
   return mapTicket(response.data);
 }
 
@@ -148,7 +172,6 @@ async function getTicketHistory(ticketId: string): Promise<StatusHistory[]> {
   const response = await api.get<BackendStatusHistory[]>(
     `/tickets/${ticketId}/history`
   );
-
   return response.data.map(mapHistory);
 }
 
@@ -157,11 +180,7 @@ async function getAgentWorkspace(_agentId: number): Promise<{
   unassigned: Ticket[];
 }> {
   const assigned = await getAllTickets();
-
-  return {
-    assigned,
-    unassigned: [],
-  };
+  return { assigned, unassigned: [] };
 }
 
 export const ticketService = {
@@ -172,6 +191,7 @@ export const ticketService = {
   createTicket,
   updateTicketStatus,
   assignTicket,
+  selfAssignTicket,
   getTicketHistory,
   getAgentWorkspace,
 };

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 import * as bcrypt from 'bcrypt';
 import { DataSource, Repository } from 'typeorm';
+
 import { User } from './users/user.entity';
 import { Role } from './users/enums/role.enum';
 import { Ticket, TicketStatus } from './tickets/ticket.entity';
@@ -27,13 +28,14 @@ type SeedUser = {
   password: string;
   role: Role;
   isActive?: boolean;
+  isPending?: boolean;
 };
 
 type SeedTicket = {
   title: string;
   description: string;
   requesterEmail: string;
-  assignedAgentEmail: string | null;
+  assignedAgentEmails: string[];
   status: TicketStatus;
 };
 
@@ -43,30 +45,48 @@ const DEMO_USERS: SeedUser[] = [
     email: 'user@example.com',
     password: 'UserPassword123!',
     role: Role.USER,
+    isActive: true,
+    isPending: false,
   },
   {
     name: 'Demo User Two',
     email: 'user2@example.com',
     password: 'UserTwoPassword123!',
     role: Role.USER,
+    isActive: true,
+    isPending: false,
   },
   {
     name: 'Demo Agent A',
     email: 'agent@example.com',
     password: 'AgentPassword123!',
     role: Role.AGENT,
+    isActive: true,
+    isPending: false,
   },
   {
     name: 'Demo Agent B',
     email: 'agent2@example.com',
     password: 'AgentTwoPassword123!',
     role: Role.AGENT,
+    isActive: true,
+    isPending: false,
   },
   {
     name: 'Demo Admin',
     email: 'admin@example.com',
     password: 'AdminPassword123!',
     role: Role.ADMIN,
+    isActive: true,
+    isPending: false,
+  },
+  {
+    name: 'Pending New User',
+    email: 'pending@example.com',
+    password: 'PendingPassword123!',
+    role: Role.USER,
+    isActive: false,
+    isPending: true,
   },
 ];
 
@@ -74,17 +94,17 @@ const DEMO_TICKETS: SeedTicket[] = [
   {
     title: 'Cannot access billing portal',
     description:
-      'The billing page returns a blank screen after login on Chrome 135.',
+      'The billing page returns a blank screen after login on Chrome.',
     requesterEmail: 'user@example.com',
-    assignedAgentEmail: 'agent@example.com',
+    assignedAgentEmails: ['agent@example.com'],
     status: TicketStatus.OPEN,
   },
   {
-    title: 'Feature request for exported dark mode reports',
+    title: 'Feature request for exported reports',
     description:
-      'Please add dark mode friendly PDF exports for the reporting module.',
+      'Please add PDF exports for the reporting module.',
     requesterEmail: 'user@example.com',
-    assignedAgentEmail: 'agent@example.com',
+    assignedAgentEmails: ['agent@example.com'],
     status: TicketStatus.IN_PROGRESS,
   },
   {
@@ -92,7 +112,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     description:
       'Reset link keeps returning the user to the same password reset form.',
     requesterEmail: 'user2@example.com',
-    assignedAgentEmail: 'agent2@example.com',
+    assignedAgentEmails: ['agent2@example.com'],
     status: TicketStatus.OPEN,
   },
   {
@@ -100,7 +120,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     description:
       'The March invoice shows two seat upgrades that were never requested.',
     requesterEmail: 'user@example.com',
-    assignedAgentEmail: 'agent2@example.com',
+    assignedAgentEmails: ['agent@example.com', 'agent2@example.com'],
     status: TicketStatus.RESOLVED,
   },
   {
@@ -108,7 +128,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     description:
       'Our team needs help configuring Google Workspace SSO for 14 users.',
     requesterEmail: 'user2@example.com',
-    assignedAgentEmail: null,
+    assignedAgentEmails: [],
     status: TicketStatus.OPEN,
   },
   {
@@ -116,7 +136,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     description:
       'I changed devices and can no longer complete MFA when signing in.',
     requesterEmail: 'user@example.com',
-    assignedAgentEmail: null,
+    assignedAgentEmails: [],
     status: TicketStatus.OPEN,
   },
 ];
@@ -127,6 +147,17 @@ async function upsertUser(
 ): Promise<User> {
   const existingUser = await userRepository.findOne({
     where: { email: seedUser.email },
+    select: [
+      'id',
+      'name',
+      'email',
+      'password',
+      'role',
+      'isActive',
+      'isPending',
+      'createdAt',
+      'updatedAt',
+    ] as (keyof User)[],
   });
 
   const passwordHash = await bcrypt.hash(seedUser.password, 10);
@@ -136,6 +167,11 @@ async function upsertUser(
     existingUser.password = passwordHash;
     existingUser.role = seedUser.role;
     existingUser.isActive = seedUser.isActive ?? true;
+
+    if ('isPending' in existingUser) {
+      existingUser.isPending = seedUser.isPending ?? false;
+    }
+
     return userRepository.save(existingUser);
   }
 
@@ -145,7 +181,8 @@ async function upsertUser(
     password: passwordHash,
     role: seedUser.role,
     isActive: seedUser.isActive ?? true,
-  });
+    isPending: seedUser.isPending ?? false,
+  } as Partial<User>);
 
   return userRepository.save(newUser);
 }
@@ -162,51 +199,62 @@ async function recreateDemoTickets(
 
   for (const seedTicket of DEMO_TICKETS) {
     const requester = usersByEmail.get(seedTicket.requesterEmail);
-    const assignedAgent = seedTicket.assignedAgentEmail
-      ? usersByEmail.get(seedTicket.assignedAgentEmail) ?? null
-      : null;
 
     if (!requester) {
       throw new Error(`Requester not found for ${seedTicket.title}`);
     }
+
+    const assignedAgents = seedTicket.assignedAgentEmails.map((email) => {
+      const agent = usersByEmail.get(email);
+
+      if (!agent) {
+        throw new Error(`Assigned agent not found: ${email}`);
+      }
+
+      if (agent.role !== Role.AGENT) {
+        throw new Error(`Assigned user is not an agent: ${email}`);
+      }
+
+      return agent;
+    });
 
     const ticket = ticketRepository.create({
       title: seedTicket.title,
       description: seedTicket.description,
       status: TicketStatus.OPEN,
       user: requester,
-      agent: assignedAgent,
-    });
+      agents: assignedAgents,
+    } as Partial<Ticket>);
 
     const createdTicket = await ticketRepository.save(ticket);
 
-    await historyRepository.save(
-      historyRepository.create({
-        ticket: createdTicket,
-        oldStatus: TicketStatus.OPEN,
-        newStatus: TicketStatus.OPEN,
-      }),
-    );
+    const createdHistory = historyRepository.create({
+      ticket: createdTicket,
+      oldStatus: TicketStatus.OPEN,
+      newStatus: TicketStatus.OPEN,
+    });
+
+    await historyRepository.save(createdHistory);
 
     if (seedTicket.status !== TicketStatus.OPEN) {
       createdTicket.status = seedTicket.status;
       await ticketRepository.save(createdTicket);
 
-      await historyRepository.save(
-        historyRepository.create({
-          ticket: createdTicket,
-          oldStatus: TicketStatus.OPEN,
-          newStatus: seedTicket.status,
-        }),
-      );
+      const updateHistory = historyRepository.create({
+        ticket: createdTicket,
+        oldStatus: TicketStatus.OPEN,
+        newStatus: seedTicket.status,
+      });
+
+      await historyRepository.save(updateHistory);
     }
 
-    seededTickets.push(
-      await ticketRepository.findOneOrFail({
-        where: { id: createdTicket.id },
-        relations: ['user', 'agent'],
-      }),
-    );
+    const reloadedTicket = await ticketRepository.findOneOrFail({
+      where: { id: createdTicket.id },
+      relations: ['user', 'agents'],
+    });
+
+    seededTickets.push(reloadedTicket);
   }
 
   return seededTickets;
@@ -238,6 +286,7 @@ async function seed() {
       email: user.email,
       role: user.role,
       isActive: user.isActive,
+      isPending: 'isPending' in user ? user.isPending : false,
     })),
   );
 
@@ -247,7 +296,7 @@ async function seed() {
       title: ticket.title,
       status: ticket.status,
       requesterEmail: ticket.user.email,
-      assignedAgentEmail: ticket.agent?.email ?? null,
+      assignedAgentEmails: ticket.agents?.map((agent) => agent.email) ?? [],
     })),
   );
 

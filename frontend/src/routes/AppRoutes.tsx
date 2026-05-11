@@ -11,9 +11,6 @@ import Profile from "../pages/Profile";
 import ManageUsers from "../pages/ManageUsers";
 import Settings from "../pages/Settings";
 import NotFound from "../pages/NotFound";
-import UserDashboard from "../pages/dashboards/UserDashboard";
-import AgentDashboard from "../pages/dashboards/AgentDashboard";
-import AdminDashboard from "../pages/dashboards/AdminDashboard";
 import ProtectedRoute from "./ProtectedRoute";
 
 export default function AppRoutes() {
@@ -48,10 +45,12 @@ export default function AppRoutes() {
 
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<Layout />}>
+          {/*
+           * Dashboard index dispatches to the right role-specific dashboard.
+           * We don't expose direct /dashboard/{user,agent,admin} routes
+           * because they would let any role render any dashboard.
+           */}
           <Route index element={<Dashboard />} />
-          <Route path="user" element={<UserDashboard />} />
-          <Route path="agent" element={<AgentDashboard />} />
-          <Route path="admin" element={<AdminDashboard />} />
           <Route path="tickets" element={<Tickets />} />
           <Route path="tickets/new" element={<CreateTicket />} />
           <Route path="tickets/:id" element={<TicketDetail />} />

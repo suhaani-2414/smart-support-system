@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
@@ -31,10 +36,21 @@ export class UsersService {
 
   /** Find all users — used by admin */
   async findAll(): Promise<User[]> {
-    return this.usersRepository.find();
+    return this.usersRepository.find({ order: { createdAt: 'DESC' } });
   }
 
-  /** Create a new user (password must already be hashed) */
+  /** Admin: list all accounts awaiting approval */
+  async findPendingUsers(): Promise<User[]> {
+    return this.usersRepository.find({
+      where: { isPending: true },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /**
+   * Create a new user (password must already be hashed).
+   * All new accounts start as pending and inactive until an admin approves them.
+   */
   async create(data: {
     name: string;
     email: string;
@@ -47,13 +63,48 @@ export class UsersService {
     if (existing) {
       throw new ConflictException('An account with this email already exists');
     }
-    const user = this.usersRepository.create(data);
+
+    const user = this.usersRepository.create({
+      ...data,
+      isPending: true,
+      isActive: false, // becomes true only after admin approval
+    });
+
     return this.usersRepository.save(user);
   }
 
-  /** Admin: toggle active/inactive status for a user account */
+  /**
+   * Admin: approve a pending account.
+   * Optionally change the role before finalising.
+   * Sets isPending=false and isActive=true.
+   */
+  async approveAccount(id: number, role?: Role): Promise<User> {
+    const user = await this.findById(id);
+
+    if (!user.isPending) {
+      throw new BadRequestException('Account has already been approved');
+    }
+
+    user.isPending = false;
+    user.isActive = true;
+
+    if (role) {
+      user.role = role;
+    }
+
+    return this.usersRepository.save(user);
+  }
+
+  /** Admin: toggle active/inactive status for an already-approved account */
   async setAccountStatus(id: number, isActive: boolean): Promise<User> {
     const user = await this.findById(id);
+
+    if (user.isPending) {
+      throw new BadRequestException(
+        'Cannot change status of a pending account — approve it first',
+      );
+    }
+
     user.isActive = isActive;
     return this.usersRepository.save(user);
   }

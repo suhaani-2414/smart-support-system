@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { MessagesModule } from './messages/messages.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { MessagesModule } from './messages/messages.module';
       }),
     }),
 
+    MailModule,
     AuthModule,
     UsersModule,
     TicketsModule,

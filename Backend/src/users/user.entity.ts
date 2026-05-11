@@ -10,28 +10,38 @@ import { Role } from './enums/role.enum';
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @Column({ length: 100 })
-  name: string;
+  name!: string;
 
   @Column({ unique: true, length: 255 })
-  email: string;
+  email!: string;
 
   /** Stored as a bcrypt hash — never expose in responses */
   @Column({ select: false })
-  password: string;
+  password!: string;
 
   @Column({ type: 'text', default: Role.USER })
-  role: Role;
+  role!: Role;
 
-  /** Admins can view/change account status */
+  /**
+   * New registrations start as pending (true) until an admin approves them.
+   * Once approved this is set to false permanently.
+   */
   @Column({ default: true })
-  isActive: boolean;
+  isPending!: boolean;
+
+  /**
+   * Admins can deactivate/reactivate accounts after approval.
+   * Starts as false — set to true when an admin approves the account.
+   */
+  @Column({ default: false })
+  isActive!: boolean;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

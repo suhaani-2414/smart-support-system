@@ -35,6 +35,11 @@ type AuthenticatedRequest = {
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
+  /**
+   * GET /tickets
+   * Returns tickets visible to the caller (filtered by role).
+   * Supports ?status= and ?unassigned=true query params.
+   */
   @Get()
   findAll(
     @Request() req: AuthenticatedRequest,
@@ -47,11 +52,18 @@ export class TicketsController {
     });
   }
 
+  /**
+   * POST /tickets
+   * Any authenticated user can create a ticket.
+   */
   @Post()
   create(@Body() dto: CreateTicketDto, @Request() req: AuthenticatedRequest) {
     return this.ticketsService.create(dto, req.user.sub);
   }
 
+  /**
+   * GET /tickets/:id
+   */
   @Get(':id')
   findOne(
     @Param('id', ParseIntPipe) id: number,
@@ -60,6 +72,10 @@ export class TicketsController {
     return this.ticketsService.findOneVisible(id, req.user);
   }
 
+  /**
+   * PATCH /tickets/:id
+   * Update the title/description of a ticket the caller owns or manages.
+   */
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
@@ -69,6 +85,12 @@ export class TicketsController {
     return this.ticketsService.update(id, dto, req.user);
   }
 
+  /**
+   * PATCH /tickets/:id/assign — ADMIN only
+   * Assign one or multiple agents to a ticket.
+   * Body: { agentIds: number[] }
+   * Replaces any existing assignment.
+   */
   @Patch(':id/assign')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
@@ -80,6 +102,25 @@ export class TicketsController {
     return this.ticketsService.assign(id, dto, req.user);
   }
 
+  /**
+   * PATCH /tickets/:id/claim — AGENT only
+   * Lets an agent self-assign to an unassigned ticket.
+   * No body required — agent identity comes from the JWT.
+   */
+  @Patch(':id/claim')
+  @UseGuards(RolesGuard)
+  @Roles(Role.AGENT)
+  claim(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.selfAssign(id, req.user.sub);
+  }
+
+  /**
+   * PATCH /tickets/:id/status — ADMIN or AGENT only
+   * Body: { status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' }
+   */
   @Patch(':id/status')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.AGENT)
@@ -91,6 +132,9 @@ export class TicketsController {
     return this.ticketsService.updateStatus(id, dto, req.user);
   }
 
+  /**
+   * GET /tickets/:id/history
+   */
   @Get(':id/history')
   getHistory(
     @Param('id', ParseIntPipe) id: number,

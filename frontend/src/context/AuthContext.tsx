@@ -17,7 +17,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (payload: LoginInput) => Promise<void>;
-  register: (payload: RegisterInput) => Promise<void>;
+  /** Returns the server message to show the user after registration */
+  register: (payload: RegisterInput) => Promise<string>;
   logout: () => Promise<void>;
   hasRole: (roles: AuthUser["role"][]) => boolean;
 }
@@ -68,9 +69,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user);
   }
 
-  async function register(payload: RegisterInput) {
+  /**
+   * Registration creates a pending account — does NOT log the user in.
+   * Returns the success message from the server to display in the UI.
+   */
+  async function register(payload: RegisterInput): Promise<string> {
     const result = await authService.register(payload);
-    setUser(result.user);
+    return result.message;
   }
 
   async function logout() {

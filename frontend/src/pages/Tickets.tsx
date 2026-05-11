@@ -35,12 +35,7 @@ export default function Tickets() {
         const data = await ticketService.getVisibleTickets(user);
         setTickets(data);
       } catch (err) {
-        setError(
-          getApiErrorMessage(
-            err,
-            "Failed to load tickets. If the error is 404, the backend is still missing GET /api/v1/tickets."
-          )
-        );
+        setError(getApiErrorMessage(err, "Failed to load tickets."));
       } finally {
         setLoading(false);
       }
@@ -50,10 +45,12 @@ export default function Tickets() {
   }, [user]);
 
   const filteredTickets = useMemo(() => {
+    const term = searchTerm.toLowerCase();
     return tickets.filter((ticket) => {
       const matchesSearch =
-        ticket.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ticket.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        !term ||
+        ticket.subject.toLowerCase().includes(term) ||
+        ticket.description.toLowerCase().includes(term) ||
         ticket.id.includes(searchTerm);
 
       const matchesStatus =

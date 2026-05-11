@@ -1,14 +1,20 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  MinLength,
+  MaxLength,
+} from 'class-validator';
 
 export class SignupDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  name: string;
+  name!: string;
 
   @IsEmail()
   @IsNotEmpty()
-  email: string;
+  email!: string;
 
   /**
    * Password must be at least 8 characters.
@@ -17,5 +23,5 @@ export class SignupDto {
   @IsString()
   @MinLength(8)
   @MaxLength(72) // bcrypt max input length
-  password: string;
+  password!: string;
 }

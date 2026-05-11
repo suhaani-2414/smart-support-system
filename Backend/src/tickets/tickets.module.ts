@@ -8,9 +8,13 @@ import { TicketStatusHistory } from './ticket-status-history.entity';
 import { User } from '../users/user.entity';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket, TicketStatusHistory, User])],
+  imports: [
+    TypeOrmModule.forFeature([Ticket, TicketStatusHistory, User]),
+    MailModule,
+  ],
   controllers: [TicketsController],
   providers: [TicketsService, JwtAuthGuard, RolesGuard],
   exports: [TicketsService],

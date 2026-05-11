@@ -9,6 +9,8 @@ import {
   type Ticket,
   type TicketStatus,
 } from "../services/ticketService";
+import { userService } from "../services/userService";
+import type { AuthUser } from "../services/authService";
 
 const statusOptions: TicketStatus[] = ["OPEN", "IN_PROGRESS", "RESOLVED"];
 
@@ -27,34 +29,41 @@ export default function TicketDetail() {
   const [history, setHistory] = useState<StatusHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [newMessage, setNewMessage] = useState("");
   const [statusUpdate, setStatusUpdate] = useState<TicketStatus>("OPEN");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
+
+  const [claiming, setClaiming] = useState(false);
+
+  const [agents, setAgents] = useState<AuthUser[]>([]);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<number[]>([]);
   const [assigning, setAssigning] = useState(false);
 
   useEffect(() => {
-    async function loadTicket() {
-      if (!id) {
-        setError("Missing ticket ID.");
-        setLoading(false);
-        return;
-      }
+    if (!id) {
+      setError("Missing ticket ID.");
+      setLoading(false);
+      return;
+    }
 
+    async function loadTicket() {
       try {
         setLoading(true);
         setError("");
 
         const [ticketData, messageData, historyData] = await Promise.all([
-          ticketService.getTicketById(id),
-          messageService.getTicketMessages(id),
-          ticketService.getTicketHistory(id),
+          ticketService.getTicketById(id!),
+          messageService.getTicketMessages(id!),
+          ticketService.getTicketHistory(id!),
         ]);
 
         setTicket(ticketData);
         setMessages(messageData);
         setHistory(historyData);
         setStatusUpdate(ticketData.status);
+        setSelectedAgentIds(ticketData.assignedAgents.map((a) => a.id));
       } catch (err) {
         setError(getApiErrorMessage(err, "Failed to load ticket details."));
       } finally {
@@ -65,32 +74,40 @@ export default function TicketDetail() {
     loadTicket();
   }, [id]);
 
+  // Load agent list for admin assignment panel
+  useEffect(() => {
+    if (user?.role !== "ADMIN") return;
+
+    userService
+      .getAllUsers()
+      .then((all) => setAgents(all.filter((u) => u.role === "AGENT" && u.isActive)))
+      .catch(() => {
+        /* silently ignore — admin will see the empty state */
+      });
+  }, [user]);
+
+  /**
+   * Mirror of the backend's authorisation rules so we don't render content
+   * the user can't actually act on. Agents are allowed to preview unassigned
+   * tickets so they can decide whether to claim them.
+   */
   const canViewTicket = useMemo(() => {
-    if (!ticket || !user) {
-      return false;
-    }
-
-    if (user.role === "ADMIN") {
-      return true;
-    }
-
+    if (!ticket || !user) return false;
+    if (user.role === "ADMIN") return true;
     if (user.role === "AGENT") {
-      return ticket.agentId === user.id;
+      const isAssigned = ticket.assignedAgents.some((a) => a.id === user.id);
+      const isUnassigned = ticket.assignedAgents.length === 0;
+      return isAssigned || isUnassigned;
     }
-
     return ticket.requesterId === user.id;
   }, [ticket, user]);
 
   async function handleSendMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!id || !user || !newMessage.trim()) {
-      return;
-    }
+    if (!id || !user || !newMessage.trim()) return;
 
     try {
       setSendingMessage(true);
-
       const message = await messageService.sendMessage({
         ticketId: id,
         content: newMessage.trim(),
@@ -98,7 +115,6 @@ export default function TicketDetail() {
         senderRole: user.role,
         senderName: user.name,
       });
-
       setMessages((current) => [...current, message]);
       setNewMessage("");
     } catch (err) {
@@ -109,9 +125,7 @@ export default function TicketDetail() {
   }
 
   async function handleStatusChange() {
-    if (!id) {
-      return;
-    }
+    if (!id) return;
 
     try {
       setSavingStatus(true);
@@ -126,25 +140,46 @@ export default function TicketDetail() {
     }
   }
 
-  async function handleAssignToSelf() {
-    if (!ticket || !user) {
-      return;
+  async function handleClaim() {
+    if (!ticket) return;
+
+    try {
+      setClaiming(true);
+      const updated = await ticketService.selfAssignTicket(ticket.id);
+      setTicket(updated);
+      setSelectedAgentIds(updated.assignedAgents.map((a) => a.id));
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Failed to claim ticket."));
+    } finally {
+      setClaiming(false);
     }
+  }
+
+  async function handleAdminAssign() {
+    if (!ticket || selectedAgentIds.length === 0) return;
 
     try {
       setAssigning(true);
-      const updatedTicket = await ticketService.assignTicket(ticket.id, user.id);
-      setTicket(updatedTicket);
+      const updated = await ticketService.assignTicket(ticket.id, selectedAgentIds);
+      setTicket(updated);
+      setSelectedAgentIds(updated.assignedAgents.map((a) => a.id));
     } catch (err) {
-      alert(getApiErrorMessage(err, "Failed to assign ticket."));
+      alert(getApiErrorMessage(err, "Failed to assign agent(s)."));
     } finally {
       setAssigning(false);
     }
   }
 
-  if (!user) {
-    return null;
+  function toggleAgentSelection(agentId: number) {
+    setSelectedAgentIds((current) =>
+      current.includes(agentId)
+        ? current.filter((id) => id !== agentId)
+        : [...current, agentId]
+    );
   }
+
+  // ── Render guards ─────────────────────────────────────────────────────────
+  if (!user) return null;
 
   if (loading) {
     return (
@@ -178,17 +213,24 @@ export default function TicketDetail() {
       <div className="card" style={{ border: "1px solid #f59e0b" }}>
         <h2 style={{ marginTop: 0 }}>Access denied</h2>
         <p style={{ color: "#9ca3af" }}>
-          This ticket is outside your current frontend visibility rules.
+          You don't have permission to view this ticket.
         </p>
       </div>
     );
   }
 
-  const canUpdateStatus = user.role === "AGENT" || user.role === "ADMIN";
-  const canAssignToSelf = user.role === "AGENT" && ticket.agentId === null;
+  const canUpdateStatus =
+    user.role === "ADMIN" ||
+    (user.role === "AGENT" &&
+      ticket.assignedAgents.some((a) => a.id === user.id));
+  const canClaim =
+    user.role === "AGENT" && ticket.assignedAgents.length === 0;
+  const isAlreadyAssigned =
+    user.role === "AGENT" && ticket.assignedAgents.some((a) => a.id === user.id);
 
   return (
     <div>
+      {/* Header */}
       <div className="card">
         <div
           style={{
@@ -199,7 +241,11 @@ export default function TicketDetail() {
           }}
         >
           <div>
-            <button className="button" onClick={() => navigate(-1)} style={{ marginBottom: "1rem" }}>
+            <button
+              className="button"
+              onClick={() => navigate(-1)}
+              style={{ marginBottom: "1rem" }}
+            >
               Back
             </button>
             <h2 style={{ margin: 0 }}>Ticket #{ticket.id}</h2>
@@ -218,10 +264,13 @@ export default function TicketDetail() {
       </div>
 
       <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "2fr 1fr" }}>
+        {/* Left column */}
         <div>
           <div className="card">
             <h3 style={{ marginTop: 0 }}>Description</h3>
-            <p style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>{ticket.description}</p>
+            <p style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>
+              {ticket.description}
+            </p>
           </div>
 
           <div className="card">
@@ -231,7 +280,6 @@ export default function TicketDetail() {
               {messages.length > 0 ? (
                 messages.map((message) => {
                   const isOwnMessage = message.senderId === String(user.id);
-
                   return (
                     <div
                       key={message.id}
@@ -264,16 +312,23 @@ export default function TicketDetail() {
               )}
             </div>
 
-            <form onSubmit={handleSendMessage} style={{ display: "grid", gap: "0.75rem" }}>
+            <form
+              onSubmit={handleSendMessage}
+              style={{ display: "grid", gap: "0.75rem" }}
+            >
               <textarea
                 className="form-input"
                 rows={4}
                 placeholder="Write a message..."
                 value={newMessage}
-                onChange={(event) => setNewMessage(event.target.value)}
+                onChange={(e) => setNewMessage(e.target.value)}
               />
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button className="button" type="submit" disabled={sendingMessage || !newMessage.trim()}>
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={sendingMessage || !newMessage.trim()}
+                >
                   {sendingMessage ? "Sending..." : "Send Message"}
                 </button>
               </div>
@@ -281,43 +336,159 @@ export default function TicketDetail() {
           </div>
         </div>
 
+        {/* Right column */}
         <div>
+          {/* Ticket details */}
           <div className="card">
             <h3 style={{ marginTop: 0 }}>Ticket Details</h3>
             <div style={{ display: "grid", gap: "0.75rem" }}>
               <div>
-                <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Requester</div>
+                <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
+                  Requester
+                </div>
                 <div>{ticket.requesterName}</div>
               </div>
+
               <div>
-                <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Assigned Agent</div>
-                <div>{ticket.assignedAgent ?? "Unassigned"}</div>
+                <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
+                  Assigned Agent(s)
+                </div>
+                {ticket.assignedAgents.length > 0 ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "0.35rem",
+                      marginTop: "0.25rem",
+                    }}
+                  >
+                    {ticket.assignedAgents.map((a) => (
+                      <span
+                        key={a.id}
+                        style={{
+                          background: "#1d4ed8",
+                          borderRadius: "9999px",
+                          padding: "0.15rem 0.6rem",
+                          fontSize: "0.8rem",
+                        }}
+                      >
+                        {a.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: "#6b7280" }}>Unassigned</div>
+                )}
               </div>
+
               <div>
-                <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Priority</div>
+                <div style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
+                  Priority
+                </div>
                 <div>{ticket.priority}</div>
               </div>
             </div>
 
-            {canAssignToSelf ? (
+            {canClaim && (
               <button
                 className="button"
-                onClick={handleAssignToSelf}
-                disabled={assigning}
-                style={{ marginTop: "1rem" }}
+                onClick={handleClaim}
+                disabled={claiming}
+                style={{ marginTop: "1rem", width: "100%" }}
               >
-                {assigning ? "Assigning..." : "Assign to Me"}
+                {claiming ? "Claiming..." : "Claim This Ticket"}
               </button>
-            ) : null}
+            )}
+
+            {isAlreadyAssigned && (
+              <p
+                style={{
+                  marginTop: "0.75rem",
+                  color: "#10b981",
+                  fontSize: "0.875rem",
+                }}
+              >
+                ✓ You are assigned to this ticket
+              </p>
+            )}
           </div>
 
-          {canUpdateStatus ? (
+          {/* Admin: assign agent(s) */}
+          {user.role === "ADMIN" && (
+            <div className="card">
+              <h3 style={{ marginTop: 0 }}>Assign Agent(s)</h3>
+              {agents.length === 0 ? (
+                <p style={{ color: "#f59e0b", fontSize: "0.875rem", marginBottom: 0 }}>
+                  No active agents yet. Approve someone with the AGENT role first.
+                </p>
+              ) : (
+                <>
+                  <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
+                    Select one or more agents. This replaces the current
+                    assignment.
+                  </p>
+
+                  <div
+                    style={{
+                      maxHeight: "200px",
+                      overflowY: "auto",
+                      border: "1px solid #374151",
+                      borderRadius: "6px",
+                      padding: "0.5rem",
+                      display: "grid",
+                      gap: "0.35rem",
+                    }}
+                  >
+                    {agents.map((agent) => (
+                      <label
+                        key={agent.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          cursor: "pointer",
+                          padding: "0.3rem 0.4rem",
+                          borderRadius: "4px",
+                          background: selectedAgentIds.includes(agent.id)
+                            ? "#1e3a5f"
+                            : "transparent",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAgentIds.includes(agent.id)}
+                          onChange={() => toggleAgentSelection(agent.id)}
+                        />
+                        {agent.name}
+                      </label>
+                    ))}
+                  </div>
+
+                  <button
+                    className="button"
+                    onClick={handleAdminAssign}
+                    disabled={assigning || selectedAgentIds.length === 0}
+                    style={{ marginTop: "0.75rem", width: "100%" }}
+                  >
+                    {assigning
+                      ? "Assigning..."
+                      : selectedAgentIds.length === 0
+                        ? "Select agents to assign"
+                        : `Assign (${selectedAgentIds.length})`}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Status update */}
+          {canUpdateStatus && (
             <div className="card">
               <h3 style={{ marginTop: 0 }}>Status</h3>
               <select
                 className="form-input"
                 value={statusUpdate}
-                onChange={(event) => setStatusUpdate(event.target.value as TicketStatus)}
+                onChange={(e) => setStatusUpdate(e.target.value as TicketStatus)}
               >
                 {statusOptions.map((status) => (
                   <option key={status} value={status}>
@@ -330,19 +501,26 @@ export default function TicketDetail() {
                 className="button"
                 onClick={handleStatusChange}
                 disabled={savingStatus || statusUpdate === ticket.status}
-                style={{ marginTop: "1rem" }}
+                style={{ marginTop: "1rem", width: "100%" }}
               >
                 {savingStatus ? "Saving..." : "Update Status"}
               </button>
             </div>
-          ) : null}
+          )}
 
+          {/* Status history */}
           <div className="card">
             <h3 style={{ marginTop: 0 }}>Status History</h3>
             {history.length > 0 ? (
               <div style={{ display: "grid", gap: "0.75rem" }}>
                 {history.map((entry) => (
-                  <div key={entry.id} style={{ borderLeft: "3px solid #3b82f6", paddingLeft: "0.75rem" }}>
+                  <div
+                    key={entry.id}
+                    style={{
+                      borderLeft: "3px solid #3b82f6",
+                      paddingLeft: "0.75rem",
+                    }}
+                  >
                     <div>
                       {entry.oldStatus} → {entry.newStatus}
                     </div>
@@ -353,7 +531,9 @@ export default function TicketDetail() {
                 ))}
               </div>
             ) : (
-              <p style={{ color: "#9ca3af", marginBottom: 0 }}>No history yet.</p>
+              <p style={{ color: "#9ca3af", marginBottom: 0 }}>
+                No history yet.
+              </p>
             )}
           </div>
         </div>

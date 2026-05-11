@@ -8,6 +8,8 @@ export interface AuthUser {
   email: string;
   role: UserRole;
   isActive: boolean;
+  /** True when the account is awaiting admin approval */
+  isPending: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -31,6 +33,7 @@ interface BackendUser {
   email: string;
   role: BackendRole;
   isActive: boolean;
+  isPending: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -54,6 +57,7 @@ function mapUser(user: BackendUser): AuthUser {
     email: user.email,
     role: normalizeRole(user.role),
     isActive: user.isActive,
+    isPending: user.isPending ?? false,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -94,13 +98,14 @@ export async function login(
 
 export async function register(
   payload: RegisterInput
-): Promise<{ accessToken: string; user: AuthUser }> {
+): Promise<{ message: string }> {
+  // Registration creates a pending account — the user cannot log in until approved.
+  // We return a message instead of auto-logging them in.
   await api.post("/auth/signup", payload);
-
-  return login({
-    email: payload.email,
-    password: payload.password,
-  });
+  return {
+    message:
+      "Account created! An admin will review and approve your account. You'll receive an email when it's ready.",
+  };
 }
 
 export async function logout(): Promise<void> {

@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { getApiErrorMessage } from "../services/api";
 
 export default function Register() {
-  const navigate = useNavigate();
   const { register } = useAuth();
 
   const [formData, setFormData] = useState({
@@ -15,6 +14,7 @@ export default function Register() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   async function handleRegister(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,13 +38,14 @@ export default function Register() {
     setSubmitting(true);
 
     try {
-      await register({
+      const message = await register({
         name: formData.name.trim(),
         email: formData.email.trim(),
         password: formData.password,
       });
 
-      navigate("/dashboard", { replace: true });
+      // Show the pending-approval message rather than navigating away
+      setSuccessMessage(message);
     } catch (err) {
       setError(getApiErrorMessage(err, "Registration failed."));
     } finally {
@@ -52,10 +53,34 @@ export default function Register() {
     }
   }
 
+  // ── Success state ──────────────────────────────────────────────────────────
+  if (successMessage) {
+    return (
+      <div className="login-container">
+        <div className="card login-box" style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "2.5rem", marginBottom: "0.75rem" }}>✅</div>
+          <h2 style={{ marginBottom: "0.75rem" }}>Account Created!</h2>
+          <p style={{ color: "#9ca3af", marginBottom: "1.5rem" }}>
+            {successMessage}
+          </p>
+          <Link to="/login" className="button" style={{ display: "inline-block" }}>
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Registration form ──────────────────────────────────────────────────────
   return (
     <div className="login-container">
       <div className="card login-box">
-        <h2 style={{ textAlign: "center", marginBottom: "1rem" }}>Create Account</h2>
+        <h2 style={{ textAlign: "center", marginBottom: "0.25rem" }}>
+          Create Account
+        </h2>
+        <p style={{ textAlign: "center", color: "#9ca3af", marginBottom: "1.5rem", fontSize: "0.875rem" }}>
+          Your account will be reviewed by an admin before you can log in.
+        </p>
 
         {error ? (
           <div style={{ color: "#ef4444", marginBottom: "1rem" }}>{error}</div>
@@ -87,7 +112,7 @@ export default function Register() {
           <input
             className="form-input"
             type="password"
-            placeholder="Password"
+            placeholder="Password (min. 8 characters)"
             value={formData.password}
             onChange={(event) =>
               setFormData((current) => ({ ...current, password: event.target.value }))

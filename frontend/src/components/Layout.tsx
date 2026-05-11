@@ -83,17 +83,8 @@ export default function Layout() {
             </NavLink>
           )}
 
-          {role === "AGENT" && (
-            <NavLink to="/dashboard/agent" style={linkStyle}>
-              Agent Workspace
-            </NavLink>
-          )}
-
           {role === "ADMIN" && (
             <>
-              <NavLink to="/dashboard/admin" style={linkStyle}>
-                Admin Overview
-              </NavLink>
               <NavLink to="/dashboard/users" style={linkStyle}>
                 Manage Users
               </NavLink>

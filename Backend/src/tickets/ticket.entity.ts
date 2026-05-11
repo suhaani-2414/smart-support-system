@@ -3,6 +3,8 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  ManyToMany,
+  JoinTable,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -31,11 +33,19 @@ export class Ticket {
   })
   status!: TicketStatus;
 
+  /** The user who opened the ticket */
   @ManyToOne(() => User, { nullable: false })
   user!: User;
 
-  @ManyToOne(() => User, { nullable: true })
-  agent!: User | null;
+  /**
+   * Agents assigned to this ticket.
+   * - An agent can self-assign (claim) an unassigned ticket.
+   * - An admin can assign one or multiple agents at once.
+   * Empty array means the ticket is unassigned.
+   */
+  @ManyToMany(() => User, { eager: false })
+  @JoinTable({ name: 'ticket_agents' })
+  agents!: User[];
 
   @CreateDateColumn()
   createdAt!: Date;
