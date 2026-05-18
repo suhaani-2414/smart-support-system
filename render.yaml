@@ -3,7 +3,7 @@
 # Deploys three things wired together:
 #   1. PostgreSQL database (free tier — 30-day expiry, see DEPLOYMENT.md)
 #   2. NestJS backend as a Web Service on Node (free tier — sleeps after 15 min idle)
-#   3. Vite-built React frontend as a Static Site (free, never sleeps)
+#   3. Vite-built React frontend as a Static Site (always free, never sleeps)
 #
 # Render provides HTTPS automatically for both services. The backend
 # listens plain HTTP inside its container; Render's edge terminates TLS.
@@ -15,9 +15,9 @@
 #   3. After first deploy, set the required secrets in the dashboard:
 #      RESEND_API_KEY, HF_API_TOKEN — these are marked `sync: false`
 #      so they don't end up committed to your repo.
-#   4. (First deploy only) Once the backend is up and you can hit the
-#      health endpoint, change DB_SYNCHRONIZE from "true" to "false" in
-#      the backend env vars to stop TypeORM from auto-altering tables.
+#   4. (First deploy only) Once the backend is up, change DB_SYNCHRONIZE
+#      from "true" to "false" in the backend env vars to stop TypeORM
+#      from auto-altering tables on future deploys.
 
 databases:
   - name: smart-support-db
@@ -88,11 +88,15 @@ services:
         value: https://router.huggingface.co/v1/chat/completions
 
   # ── Frontend ──────────────────────────────────────────────────────────
+  #
+  # NOTE: no `plan` field. Static sites are always free on Render —
+  # they don't have paid tiers, and Render rejects `plan: free` on them
+  # ("no such plan free for service type web"). This is the fix for
+  # the error reported on the previous Blueprint attempt.
   - type: web
     name: smart-support-frontend
     runtime: static
     rootDir: frontend
-    plan: free
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
     # SPA fallback. Render also reads frontend/public/_redirects for the
