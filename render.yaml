@@ -8,12 +8,13 @@
 # Render provides HTTPS automatically for both services. The backend
 # listens plain HTTP inside its container; Render's edge terminates TLS.
 #
-# Build commands use `npm install` rather than `npm ci`. `npm ci` is
-# stricter but requires package-lock.json to be present in the repo —
-# if it's gitignored or wasn't committed, the build fails with
-# "EUSAGE: The `npm ci` command can only install with an existing
-# package-lock.json". `npm install` works in either case, generating
-# a lockfile on the fly when needed.
+# Build commands use `--include=dev`. Render exposes NODE_ENV=production
+# to the BUILD process as well as the runtime, and when NODE_ENV is
+# production npm skips devDependencies by default. NestJS keeps the
+# `nest` CLI binary in devDependencies, and Vite keeps `vite` in
+# devDependencies — so without --include=dev both builds fail with
+# "command not found". The flag is build-only; the runtime container
+# still respects NODE_ENV=production everywhere else.
 
 databases:
   - name: smart-support-db
@@ -28,7 +29,7 @@ services:
     runtime: node
     rootDir: backend
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /api/v1
     envVars:
@@ -53,20 +54,14 @@ services:
       - key: JWT_EXPIRES_IN
         value: 8h
 
-      # CORS — must match the deployed frontend URL. The default below
-      # assumes you keep the service name "smart-support-frontend"; if
-      # you rename it, update this value in the Render dashboard.
       - key: CORS_ORIGINS
         value: https://smart-support-frontend.onrender.com
 
-      # Email — supply your own Resend key in the dashboard (sync:false
-      # keeps it out of git).
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
         value: Smart Support <onboarding@resend.dev>
 
-      # AI chat — same idea, your own HF token via the dashboard.
       - key: HF_API_TOKEN
         sync: false
       - key: HF_MODEL
@@ -75,13 +70,12 @@ services:
         value: https://router.huggingface.co/v1/chat/completions
 
   # ── Frontend ──────────────────────────────────────────────────────────
-  # NOTE: no `plan` field. Static sites are always free on Render —
-  # they don't have paid tiers.
+  # NOTE: no `plan` field. Static sites are always free on Render.
   - type: web
     name: smart-support-frontend
     runtime: static
     rootDir: frontend
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: ./dist
     routes:
       - type: rewrite
