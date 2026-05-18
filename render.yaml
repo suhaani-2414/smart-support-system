@@ -28,7 +28,7 @@ services:
     runtime: node
     rootDir: backend
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: node dist/main
     healthCheckPath: /api/v1
     envVars:
