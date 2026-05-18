@@ -34,7 +34,7 @@ services:
     runtime: node
     rootDir: backend
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install && npm run build
     startCommand: node dist/main
     # Render hits this URL to check health. We don't have a dedicated
     # endpoint, but the global prefix means GET /api/v1 → 404 with a JSON
