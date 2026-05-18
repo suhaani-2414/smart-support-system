@@ -1,0 +1,108 @@
+# Render Blueprint for Smart Support System
+#
+# Deploys three things wired together:
+#   1. PostgreSQL database (free tier — 30-day expiry, see DEPLOYMENT.md)
+#   2. NestJS backend as a Web Service on Node (free tier — sleeps after 15 min idle)
+#   3. Vite-built React frontend as a Static Site (free, never sleeps)
+#
+# Render provides HTTPS automatically for both services. The backend
+# listens plain HTTP inside its container; Render's edge terminates TLS.
+#
+# Usage:
+#   1. Push this file (and the rest of the project) to a Git repo.
+#   2. In Render: New → Blueprint → connect the repo. Render reads this
+#      file and creates everything.
+#   3. After first deploy, set the required secrets in the dashboard:
+#      RESEND_API_KEY, HF_API_TOKEN — these are marked `sync: false`
+#      so they don't end up committed to your repo.
+#   4. (First deploy only) Once the backend is up and you can hit the
+#      health endpoint, change DB_SYNCHRONIZE from "true" to "false" in
+#      the backend env vars to stop TypeORM from auto-altering tables.
+
+databases:
+  - name: smart-support-db
+    databaseName: support_system
+    user: smart_support
+    plan: free
+    # Free tier: 256 MB RAM, 1 GB storage, expires 30 days after creation.
+    # See DEPLOYMENT.md for the upgrade path.
+
+services:
+  # ── Backend ───────────────────────────────────────────────────────────
+  - type: web
+    name: smart-support-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/main
+    # Render hits this URL to check health. We don't have a dedicated
+    # endpoint, but the global prefix means GET /api/v1 → 404 with a JSON
+    # body, which is good enough (Render counts 2xx/3xx/4xx as alive,
+    # only 5xx as dead).
+    healthCheckPath: /api/v1
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Database wiring — Render injects the internal connection string
+      # from the database resource above.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-support-db
+          property: connectionString
+
+      # Internal Render Postgres URL doesn't need SSL.
+      - key: DB_SSL
+        value: "false"
+
+      # FIRST DEPLOY ONLY: set true so TypeORM creates the schema.
+      # After tables exist, change to "false" in the dashboard.
+      - key: DB_SYNCHRONIZE
+        value: "true"
+
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+
+      # CORS — must match the deployed frontend URL. The default below
+      # assumes you keep the service name "smart-support-frontend"; if
+      # you rename it, update this value in the Render dashboard.
+      - key: CORS_ORIGINS
+        value: https://smart-support-frontend.onrender.com
+
+      # Email — supply your own Resend key in the dashboard (sync:false
+      # keeps it out of git).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        value: Smart Support <onboarding@resend.dev>
+
+      # AI chat — same idea, your own HF token via the dashboard.
+      - key: HF_API_TOKEN
+        sync: false
+      - key: HF_MODEL
+        value: meta-llama/Llama-3.1-8B-Instruct
+      - key: HF_ENDPOINT
+        value: https://router.huggingface.co/v1/chat/completions
+
+  # ── Frontend ──────────────────────────────────────────────────────────
+  - type: web
+    name: smart-support-frontend
+    runtime: static
+    rootDir: frontend
+    plan: free
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    # SPA fallback. Render also reads frontend/public/_redirects for the
+    # same effect; keeping the rule here too is just belt-and-braces.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Default assumes the backend service is named "smart-support-api".
+      # If you renamed it, update this in the Render dashboard.
+      - key: VITE_API_URL
+        value: https://smart-support-api.onrender.com/api/v1
