@@ -10,6 +10,8 @@ import { UsersModule } from './users/users.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { MessagesModule } from './messages/messages.module';
 import { MailModule } from './mail/mail.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AiChatModule } from './ai-chat/ai-chat.module';
 
 @Module({
   imports: [
@@ -33,10 +35,12 @@ import { MailModule } from './mail/mail.module';
     }),
 
     MailModule,
+    NotificationsModule,
     AuthModule,
     UsersModule,
     TicketsModule,
     MessagesModule,
+    AiChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

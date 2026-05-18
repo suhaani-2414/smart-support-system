@@ -38,32 +38,36 @@ export class TicketsController {
   /**
    * GET /tickets
    * Returns tickets visible to the caller (filtered by role).
-   * Supports ?status= and ?unassigned=true query params.
+   * Query params:
+   *   ?status=OPEN|IN_PROGRESS|RESOLVED   filter by status
+   *   ?unassigned=true                    show the unassigned pool
+   *   ?archived=true                      admin only — show archive
+   *   ?archived=all                       admin only — show active + archive
    */
   @Get()
   findAll(
     @Request() req: AuthenticatedRequest,
     @Query('status') status?: TicketStatus,
     @Query('unassigned') unassigned?: string,
+    @Query('archived') archived?: string,
   ) {
+    let archivedFilter: boolean | 'all' | undefined;
+    if (archived === 'true') archivedFilter = true;
+    else if (archived === 'all') archivedFilter = 'all';
+    else if (archived === 'false') archivedFilter = false;
+
     return this.ticketsService.findAllVisible(req.user, {
       status,
       unassigned: unassigned === 'true',
+      archived: archivedFilter,
     });
   }
 
-  /**
-   * POST /tickets
-   * Any authenticated user can create a ticket.
-   */
   @Post()
   create(@Body() dto: CreateTicketDto, @Request() req: AuthenticatedRequest) {
     return this.ticketsService.create(dto, req.user.sub);
   }
 
-  /**
-   * GET /tickets/:id
-   */
   @Get(':id')
   findOne(
     @Param('id', ParseIntPipe) id: number,
@@ -74,7 +78,8 @@ export class TicketsController {
 
   /**
    * PATCH /tickets/:id
-   * Update the title/description of a ticket the caller owns or manages.
+   * Title / description / priority. Permission checked in the service:
+   * admin or original requester only.
    */
   @Patch(':id')
   update(
@@ -85,12 +90,6 @@ export class TicketsController {
     return this.ticketsService.update(id, dto, req.user);
   }
 
-  /**
-   * PATCH /tickets/:id/assign — ADMIN only
-   * Assign one or multiple agents to a ticket.
-   * Body: { agentIds: number[] }
-   * Replaces any existing assignment.
-   */
   @Patch(':id/assign')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
@@ -102,11 +101,6 @@ export class TicketsController {
     return this.ticketsService.assign(id, dto, req.user);
   }
 
-  /**
-   * PATCH /tickets/:id/claim — AGENT only
-   * Lets an agent self-assign to an unassigned ticket.
-   * No body required — agent identity comes from the JWT.
-   */
   @Patch(':id/claim')
   @UseGuards(RolesGuard)
   @Roles(Role.AGENT)
@@ -117,10 +111,6 @@ export class TicketsController {
     return this.ticketsService.selfAssign(id, req.user.sub);
   }
 
-  /**
-   * PATCH /tickets/:id/status — ADMIN or AGENT only
-   * Body: { status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' }
-   */
   @Patch(':id/status')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.AGENT)
@@ -133,8 +123,33 @@ export class TicketsController {
   }
 
   /**
-   * GET /tickets/:id/history
+   * PATCH /tickets/:id/archive — ADMIN only.
+   * Soft-archives the ticket (hidden from default lists, reversible).
    */
+  @Patch(':id/archive')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  archive(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.archive(id, req.user);
+  }
+
+  /**
+   * PATCH /tickets/:id/unarchive — ADMIN only.
+   * Restores an archived ticket to the active list.
+   */
+  @Patch(':id/unarchive')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  unarchive(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.unarchive(id, req.user);
+  }
+
   @Get(':id/history')
   getHistory(
     @Param('id', ParseIntPipe) id: number,

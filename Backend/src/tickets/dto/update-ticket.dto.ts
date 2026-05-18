@@ -1,4 +1,5 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { TicketPriority } from '../ticket.entity';
 
 export class UpdateTicketDto {
   @IsOptional()
@@ -8,4 +9,12 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  /**
+   * Allow priority to be changed after creation (escalation/de-escalation).
+   * The requester can change their own ticket; admins can change any.
+   */
+  @IsOptional()
+  @IsEnum(TicketPriority)
+  priority?: TicketPriority;
 }

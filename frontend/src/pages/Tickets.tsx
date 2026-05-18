@@ -12,6 +12,8 @@ const statusOptions: Array<"ALL" | TicketStatus> = [
   "RESOLVED",
 ];
 
+type ArchiveView = "active" | "archived" | "all";
+
 export default function Tickets() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -21,6 +23,9 @@ export default function Tickets() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | TicketStatus>("ALL");
+  const [archiveView, setArchiveView] = useState<ArchiveView>("active");
+
+  const isAdmin = user?.role === "ADMIN";
 
   useEffect(() => {
     async function fetchTickets() {
@@ -32,7 +37,19 @@ export default function Tickets() {
       try {
         setLoading(true);
         setError("");
-        const data = await ticketService.getVisibleTickets(user);
+
+        // archiveView only meaningfully changes the result for admins —
+        // the server forces "active only" for everyone else.
+        const archivedParam: boolean | "all" | undefined =
+          archiveView === "archived"
+            ? true
+            : archiveView === "all"
+              ? "all"
+              : false;
+
+        const data = await ticketService.getVisibleTickets(user, {
+          archived: archivedParam,
+        });
         setTickets(data);
       } catch (err) {
         setError(getApiErrorMessage(err, "Failed to load tickets."));
@@ -42,7 +59,7 @@ export default function Tickets() {
     }
 
     fetchTickets();
-  }, [user]);
+  }, [user, archiveView]);
 
   const filteredTickets = useMemo(() => {
     const term = searchTerm.toLowerCase();
@@ -69,6 +86,17 @@ export default function Tickets() {
     AGENT: "Ticket Queue",
     ADMIN: "All Tickets",
   } as const;
+
+  const archiveTabStyle = (view: ArchiveView): React.CSSProperties => ({
+    padding: "0.4rem 0.9rem",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    background: archiveView === view ? "#1d4ed8" : "#374151",
+    color: "#fff",
+    fontWeight: archiveView === view ? 600 : 400,
+    fontSize: "0.85rem",
+  });
 
   return (
     <div>
@@ -97,6 +125,46 @@ export default function Tickets() {
             </button>
           )}
         </div>
+
+        {isAdmin && (
+          <div
+            style={{
+              display: "flex",
+              gap: "0.4rem",
+              marginTop: "1rem",
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                color: "#9ca3af",
+                fontSize: "0.85rem",
+                alignSelf: "center",
+                marginRight: "0.25rem",
+              }}
+            >
+              View:
+            </span>
+            <button
+              style={archiveTabStyle("active")}
+              onClick={() => setArchiveView("active")}
+            >
+              Active
+            </button>
+            <button
+              style={archiveTabStyle("archived")}
+              onClick={() => setArchiveView("archived")}
+            >
+              Archived
+            </button>
+            <button
+              style={archiveTabStyle("all")}
+              onClick={() => setArchiveView("all")}
+            >
+              All
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
@@ -143,7 +211,9 @@ export default function Tickets() {
         <div className="card">
           <h3 style={{ marginTop: 0 }}>No tickets found</h3>
           <p style={{ color: "#9ca3af", marginBottom: 0 }}>
-            Try adjusting your search or status filter.
+            {isAdmin && archiveView === "archived"
+              ? "No archived tickets."
+              : "Try adjusting your search or status filter."}
           </p>
         </div>
       )}

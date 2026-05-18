@@ -14,14 +14,14 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from './enums/role.enum';
-import { MailService } from '../mail/mail.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
-    private readonly mailService: MailService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /** GET /users/me — any authenticated user can fetch their own profile */
@@ -64,7 +64,7 @@ export class UsersController {
   /**
    * POST /users/:id/approve — admin only: approve a pending account.
    * Body (optional): { role: 'user' | 'agent' | 'admin' }
-   * Sends an approval email to the user.
+   * Fires an in-app notification + email to the user.
    */
   @Post(':id/approve')
   @UseGuards(RolesGuard)
@@ -74,8 +74,8 @@ export class UsersController {
     @Body('role') role?: Role,
   ) {
     const user = await this.usersService.approveAccount(id, role);
-    // Fire-and-forget — don't block the response on email delivery
-    void this.mailService.sendAccountApproved(user.name, user.email);
+    // Fire-and-forget — don't block the response on notification delivery
+    void this.notificationsService.notifyAccountApproved(user);
     return user;
   }
 

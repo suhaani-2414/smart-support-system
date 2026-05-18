@@ -36,7 +36,14 @@ export default function TicketCard({ ticket }: TicketCardProps) {
         : "priority-medium";
 
   return (
-    <div className="ticket-card">
+    <div
+      className="ticket-card"
+      style={
+        ticket.isArchived
+          ? { opacity: 0.7, borderLeft: "3px solid #b45309" }
+          : undefined
+      }
+    >
       <div style={{ fontWeight: "bold", color: "#9ca3af" }}>#{ticket.id}</div>
 
       <div style={{ flex: 1, marginLeft: "1rem" }}>
@@ -51,6 +58,23 @@ export default function TicketCard({ ticket }: TicketCardProps) {
           }}
         >
           {ticket.subject}
+          {ticket.isArchived && (
+            <span
+              style={{
+                marginLeft: "0.6rem",
+                background: "#7c2d12",
+                color: "#fed7aa",
+                padding: "0.05rem 0.45rem",
+                borderRadius: "9999px",
+                fontSize: "0.7rem",
+                fontWeight: 600,
+                letterSpacing: "0.03em",
+                verticalAlign: "middle",
+              }}
+            >
+              ARCHIVED
+            </span>
+          )}
         </Link>
         <div style={{ fontSize: "0.875rem", color: "#9ca3af" }}>
           {describeAssignment(ticket)}

@@ -1,43 +1,118 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
 
+/**
+ * MailService — sends transactional email via Resend's REST API.
+ *
+ * Why Resend (May 2026):
+ * - 3,000 emails/month and 100/day on the forever-free tier, no card required.
+ * - Simple REST API; no SMTP, no nodemailer dependency.
+ * - For dev you can send from `onboarding@resend.dev` (no domain setup) to
+ *   the email address you signed up with. For prod, verify a domain via
+ *   DNS at https://resend.com/domains.
+ *
+ * The public interface (`sendRaw` plus the typed wrappers) is unchanged
+ * from the nodemailer version, so NotificationsService keeps working
+ * without modification.
+ *
+ * Email failures are LOGGED, not thrown. Business flows (signup, approval,
+ * ticket events) must never break because of a delivery failure.
+ */
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
-  private readonly transporter: nodemailer.Transporter;
+
+  private readonly apiKey: string | undefined;
   private readonly from: string;
+  private readonly endpoint: string;
 
   constructor(private readonly configService: ConfigService) {
+    this.apiKey = this.configService.get<string>('RESEND_API_KEY');
     this.from = this.configService.get<string>(
       'MAIL_FROM',
-      'Support System <noreply@support.example.com>',
+      'Support System <onboarding@resend.dev>',
     );
-
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('MAIL_HOST', 'smtp.example.com'),
-      port: Number(this.configService.get<string>('MAIL_PORT', '587')),
-      secure: this.configService.get<string>('MAIL_SECURE', 'false') === 'true',
-      auth: {
-        user: this.configService.get<string>('MAIL_USER', ''),
-        pass: this.configService.get<string>('MAIL_PASS', ''),
-      },
-    });
+    this.endpoint = this.configService.get<string>(
+      'RESEND_ENDPOINT',
+      'https://api.resend.com/emails',
+    );
   }
 
-  private async send(to: string, subject: string, html: string): Promise<void> {
-    try {
-      await this.transporter.sendMail({ from: this.from, to, subject, html });
-      this.logger.log(`Email sent → ${to} | ${subject}`);
-    } catch (error) {
-      // Log but never throw — email failures must not break primary flows.
-      this.logger.error(`Failed to send email → ${to} | ${subject}`, error);
+  onModuleInit(): void {
+    if (!this.apiKey) {
+      this.logger.warn(
+        'RESEND_API_KEY is not set — email delivery is DISABLED. ' +
+          'In-app notifications still work; emails will be skipped with a log entry. ' +
+          'Get a free key at https://resend.com/api-keys',
+      );
     }
   }
 
-  /** Sent immediately after a new account is created. */
+  /**
+   * Low-level send. Used by NotificationsService and (legacy) by the typed
+   * wrappers below.
+   *
+   * Errors and non-2xx responses are caught and logged; this method never
+   * throws. NotificationsService relies on that contract.
+   */
+  async sendRaw(to: string, subject: string, html: string): Promise<void> {
+    if (!this.apiKey) {
+      this.logger.warn(`Skipping email (no API key) → ${to} | ${subject}`);
+      return;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: this.from,
+          to: [to],
+          subject,
+          html,
+        }),
+      });
+    } catch (err) {
+      this.logger.error(
+        `Could not reach Resend → ${to} | ${subject} | ${(err as Error).message}`,
+      );
+      return;
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      // 422 from Resend usually means an unverified domain or a malformed
+      // address. 401/403 means the key is wrong. 429 means rate-limited.
+      this.logger.error(
+        `Resend rejected message → ${to} | ${subject} | ` +
+          `status=${response.status} body=${body.slice(0, 300)}`,
+      );
+      return;
+    }
+
+    let id = '?';
+    try {
+      const data = (await response.json()) as { id?: string };
+      if (data?.id) id = data.id;
+    } catch {
+      // Non-fatal — we'll just log without an id
+    }
+
+    this.logger.log(`Email sent → ${to} | ${subject} | resend_id=${id}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Typed wrappers — kept for backwards compatibility with any code path that
+  // hasn't migrated to NotificationsService yet. Each builds the HTML body
+  // and delegates to sendRaw().
+  // ---------------------------------------------------------------------------
+
   async sendAccountCreated(name: string, email: string): Promise<void> {
-    await this.send(
+    await this.sendRaw(
       email,
       'Account Created – Pending Admin Approval',
       `
@@ -51,9 +126,8 @@ export class MailService {
     );
   }
 
-  /** Sent when an admin approves a pending account. */
   async sendAccountApproved(name: string, email: string): Promise<void> {
-    await this.send(
+    await this.sendRaw(
       email,
       'Account Approved – You Can Now Log In',
       `
@@ -65,14 +139,13 @@ export class MailService {
     );
   }
 
-  /** Sent to the user who opened the ticket after it is created. */
   async sendTicketCreated(
     name: string,
     email: string,
     ticketId: number,
     title: string,
   ): Promise<void> {
-    await this.send(
+    await this.sendRaw(
       email,
       `Ticket #${ticketId} Created Successfully`,
       `
@@ -88,14 +161,13 @@ export class MailService {
     );
   }
 
-  /** Sent to the user when their ticket status changes to RESOLVED. */
   async sendTicketResolved(
     name: string,
     email: string,
     ticketId: number,
     title: string,
   ): Promise<void> {
-    await this.send(
+    await this.sendRaw(
       email,
       `Ticket #${ticketId} Has Been Resolved`,
       `

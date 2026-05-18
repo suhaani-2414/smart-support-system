@@ -41,6 +41,8 @@ export default function TicketDetail() {
   const [selectedAgentIds, setSelectedAgentIds] = useState<number[]>([]);
   const [assigning, setAssigning] = useState(false);
 
+  const [archiving, setArchiving] = useState(false);
+
   useEffect(() => {
     if (!id) {
       setError("Missing ticket ID.");
@@ -178,6 +180,39 @@ export default function TicketDetail() {
     );
   }
 
+  /** Admin archives the ticket (hide from default lists). */
+  async function handleArchive() {
+    if (!ticket) return;
+    const confirmed = window.confirm(
+      `Archive ticket #${ticket.id}? It will be hidden from the active list. You can restore it later from the archived view.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setArchiving(true);
+      const updated = await ticketService.archiveTicket(ticket.id);
+      setTicket(updated);
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Failed to archive ticket."));
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  /** Admin restores an archived ticket. */
+  async function handleUnarchive() {
+    if (!ticket) return;
+    try {
+      setArchiving(true);
+      const updated = await ticketService.unarchiveTicket(ticket.id);
+      setTicket(updated);
+    } catch (err) {
+      alert(getApiErrorMessage(err, "Failed to unarchive ticket."));
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   // ── Render guards ─────────────────────────────────────────────────────────
   if (!user) return null;
 
@@ -220,13 +255,17 @@ export default function TicketDetail() {
   }
 
   const canUpdateStatus =
-    user.role === "ADMIN" ||
-    (user.role === "AGENT" &&
-      ticket.assignedAgents.some((a) => a.id === user.id));
+    !ticket.isArchived &&
+    (user.role === "ADMIN" ||
+      (user.role === "AGENT" &&
+        ticket.assignedAgents.some((a) => a.id === user.id)));
   const canClaim =
-    user.role === "AGENT" && ticket.assignedAgents.length === 0;
+    !ticket.isArchived &&
+    user.role === "AGENT" &&
+    ticket.assignedAgents.length === 0;
   const isAlreadyAssigned =
     user.role === "AGENT" && ticket.assignedAgents.some((a) => a.id === user.id);
+  const canSendMessage = !ticket.isArchived;
 
   return (
     <div>
@@ -250,6 +289,23 @@ export default function TicketDetail() {
             </button>
             <h2 style={{ margin: 0 }}>Ticket #{ticket.id}</h2>
             <p style={{ color: "#9ca3af", marginBottom: 0 }}>{ticket.subject}</p>
+            {ticket.isArchived && (
+              <span
+                style={{
+                  display: "inline-block",
+                  marginTop: "0.5rem",
+                  background: "#7c2d12",
+                  color: "#fed7aa",
+                  padding: "0.15rem 0.6rem",
+                  borderRadius: "9999px",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  letterSpacing: "0.03em",
+                }}
+              >
+                ARCHIVED
+              </span>
+            )}
           </div>
 
           <div style={{ textAlign: "right" }}>
@@ -327,7 +383,7 @@ export default function TicketDetail() {
                 <button
                   className="button"
                   type="submit"
-                  disabled={sendingMessage || !newMessage.trim()}
+                  disabled={sendingMessage || !newMessage.trim() || !canSendMessage}
                 >
                   {sendingMessage ? "Sending..." : "Send Message"}
                 </button>
@@ -414,7 +470,7 @@ export default function TicketDetail() {
           </div>
 
           {/* Admin: assign agent(s) */}
-          {user.role === "ADMIN" && (
+          {user.role === "ADMIN" && !ticket.isArchived && (
             <div className="card">
               <h3 style={{ marginTop: 0 }}>Assign Agent(s)</h3>
               {agents.length === 0 ? (
@@ -505,6 +561,45 @@ export default function TicketDetail() {
               >
                 {savingStatus ? "Saving..." : "Update Status"}
               </button>
+            </div>
+          )}
+
+          {/* Admin: archive controls */}
+          {user.role === "ADMIN" && (
+            <div className="card">
+              <h3 style={{ marginTop: 0 }}>Admin Actions</h3>
+              {ticket.isArchived ? (
+                <>
+                  <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
+                    This ticket is archived. Restore it to enable status,
+                    assignment and message changes again.
+                  </p>
+                  <button
+                    className="button"
+                    onClick={handleUnarchive}
+                    disabled={archiving}
+                    style={{ width: "100%", background: "#10b981" }}
+                  >
+                    {archiving ? "Restoring..." : "Restore from Archive"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>
+                    Archiving hides the ticket from active lists. It can be
+                    restored later. Status, assignment and new messages are
+                    disabled while archived.
+                  </p>
+                  <button
+                    className="button"
+                    onClick={handleArchive}
+                    disabled={archiving}
+                    style={{ width: "100%", background: "#b45309" }}
+                  >
+                    {archiving ? "Archiving..." : "Archive Ticket"}
+                  </button>
+                </>
+              )}
             </div>
           )}
 

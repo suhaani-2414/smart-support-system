@@ -15,9 +15,12 @@ interface BackendTicket {
   title: string;
   description: string;
   status: TicketStatus;
+  priority?: TicketPriority;
   user: BackendUserSummary;
   /** ManyToMany — array of assigned agents (empty = unassigned) */
   agents: BackendUserSummary[];
+  isArchived?: boolean;
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +52,8 @@ export interface Ticket {
   requesterName: string;
   /** Convenience: id of first agent (null if unassigned) */
   agentId: number | null;
+  isArchived: boolean;
+  archivedAt: string | null;
 }
 
 export interface StatusHistory {
@@ -69,7 +74,22 @@ export interface NewTicketData {
 type TicketListOptions = {
   status?: TicketStatus;
   unassigned?: boolean;
+  /**
+   * Archive filter — only takes effect for admin viewers.
+   * - undefined / false → only non-archived (default).
+   * - true              → only archived.
+   * - "all"             → both.
+   */
+  archived?: boolean | "all";
 };
+
+function normalisePriority(value: unknown): TicketPriority {
+  if (value === "LOW" || value === "MEDIUM" || value === "HIGH") {
+    return value;
+  }
+  // Legacy tickets created before the priority column existed land here.
+  return "MEDIUM";
+}
 
 function mapTicket(ticket: BackendTicket): Ticket {
   const agents = ticket.agents ?? [];
@@ -78,13 +98,16 @@ function mapTicket(ticket: BackendTicket): Ticket {
     subject: ticket.title,
     description: ticket.description,
     status: ticket.status,
-    priority: "MEDIUM",
+    // Read priority FROM the backend instead of hard-coding MEDIUM.
+    priority: normalisePriority(ticket.priority),
     createdAt: ticket.createdAt,
     assignedAgent: agents.length > 0 ? agents[0].name : null,
     assignedAgents: agents.map((a) => ({ id: a.id, name: a.name })),
     requesterId: ticket.user.id,
     requesterName: ticket.user.name,
     agentId: agents.length > 0 ? agents[0].id : null,
+    isArchived: Boolean(ticket.isArchived),
+    archivedAt: ticket.archivedAt ?? null,
   };
 }
 
@@ -99,14 +122,20 @@ function mapHistory(history: BackendStatusHistory): StatusHistory {
 }
 
 async function getAllTickets(options: TicketListOptions = {}): Promise<Ticket[]> {
-  const response = await api.get<BackendTicket[]>("/tickets", {
-    params: {
-      ...(options.status ? { status: options.status } : {}),
-      ...(options.unassigned !== undefined
-        ? { unassigned: String(options.unassigned) }
-        : {}),
-    },
-  });
+  const params: Record<string, string> = {};
+
+  if (options.status) params.status = options.status;
+  if (options.unassigned !== undefined) {
+    params.unassigned = String(options.unassigned);
+  }
+  if (options.archived === true) {
+    params.archived = "true";
+  } else if (options.archived === "all") {
+    params.archived = "all";
+  }
+  // archived === false / undefined → server default (active only)
+
+  const response = await api.get<BackendTicket[]>("/tickets", { params });
   return response.data.map(mapTicket);
 }
 
@@ -127,9 +156,12 @@ async function getTicketById(id: string): Promise<Ticket> {
 }
 
 async function createTicket(input: NewTicketData): Promise<Ticket> {
+  // Send the user-selected priority. The backend treats it as optional and
+  // defaults to MEDIUM at the entity level if omitted.
   const payload = {
     title: input.subject,
     description: input.description,
+    priority: input.priority,
   };
   const response = await api.post<BackendTicket>("/tickets", payload);
   return mapTicket(response.data);
@@ -145,10 +177,16 @@ async function updateTicketStatus(
   return mapTicket(response.data);
 }
 
-/**
- * Admin: assign one or multiple agents to a ticket.
- * Replaces any existing assignment.
- */
+async function updateTicketPriority(
+  ticketId: string,
+  priority: TicketPriority
+): Promise<Ticket> {
+  const response = await api.patch<BackendTicket>(`/tickets/${ticketId}`, {
+    priority,
+  });
+  return mapTicket(response.data);
+}
+
 async function assignTicket(
   ticketId: string,
   agentIds: number[]
@@ -159,12 +197,24 @@ async function assignTicket(
   return mapTicket(response.data);
 }
 
-/**
- * Agent: self-assign (claim) an unassigned ticket.
- * No body required — the server uses the JWT identity.
- */
 async function selfAssignTicket(ticketId: string): Promise<Ticket> {
   const response = await api.patch<BackendTicket>(`/tickets/${ticketId}/claim`);
+  return mapTicket(response.data);
+}
+
+/** Admin: archive a ticket (hide from default lists). */
+async function archiveTicket(ticketId: string): Promise<Ticket> {
+  const response = await api.patch<BackendTicket>(
+    `/tickets/${ticketId}/archive`
+  );
+  return mapTicket(response.data);
+}
+
+/** Admin: restore an archived ticket. */
+async function unarchiveTicket(ticketId: string): Promise<Ticket> {
+  const response = await api.patch<BackendTicket>(
+    `/tickets/${ticketId}/unarchive`
+  );
   return mapTicket(response.data);
 }
 
@@ -190,8 +240,11 @@ export const ticketService = {
   getTicketById,
   createTicket,
   updateTicketStatus,
+  updateTicketPriority,
   assignTicket,
   selfAssignTicket,
+  archiveTicket,
+  unarchiveTicket,
   getTicketHistory,
   getAgentWorkspace,
 };

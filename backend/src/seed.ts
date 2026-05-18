@@ -5,7 +5,11 @@ import { DataSource, Repository } from 'typeorm';
 
 import { User } from './users/user.entity';
 import { Role } from './users/enums/role.enum';
-import { Ticket, TicketStatus } from './tickets/ticket.entity';
+import {
+  Ticket,
+  TicketPriority,
+  TicketStatus,
+} from './tickets/ticket.entity';
 import { TicketStatusHistory } from './tickets/ticket-status-history.entity';
 
 dotenv.config();
@@ -37,6 +41,7 @@ type SeedTicket = {
   requesterEmail: string;
   assignedAgentEmails: string[];
   status: TicketStatus;
+  priority: TicketPriority;
 };
 
 const DEMO_USERS: SeedUser[] = [
@@ -98,6 +103,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     requesterEmail: 'user@example.com',
     assignedAgentEmails: ['agent@example.com'],
     status: TicketStatus.OPEN,
+    priority: TicketPriority.HIGH,
   },
   {
     title: 'Feature request for exported reports',
@@ -106,6 +112,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     requesterEmail: 'user@example.com',
     assignedAgentEmails: ['agent@example.com'],
     status: TicketStatus.IN_PROGRESS,
+    priority: TicketPriority.LOW,
   },
   {
     title: 'Password reset loop on mobile',
@@ -114,6 +121,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     requesterEmail: 'user2@example.com',
     assignedAgentEmails: ['agent2@example.com'],
     status: TicketStatus.OPEN,
+    priority: TicketPriority.MEDIUM,
   },
   {
     title: 'Invoice mismatch for March subscription',
@@ -122,6 +130,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     requesterEmail: 'user@example.com',
     assignedAgentEmails: ['agent@example.com', 'agent2@example.com'],
     status: TicketStatus.RESOLVED,
+    priority: TicketPriority.HIGH,
   },
   {
     title: 'SSO setup guidance needed',
@@ -130,6 +139,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     requesterEmail: 'user2@example.com',
     assignedAgentEmails: [],
     status: TicketStatus.OPEN,
+    priority: TicketPriority.MEDIUM,
   },
   {
     title: 'Two-factor authentication locked me out',
@@ -138,6 +148,7 @@ const DEMO_TICKETS: SeedTicket[] = [
     requesterEmail: 'user@example.com',
     assignedAgentEmails: [],
     status: TicketStatus.OPEN,
+    priority: TicketPriority.HIGH,
   },
 ];
 
@@ -222,6 +233,7 @@ async function recreateDemoTickets(
       title: seedTicket.title,
       description: seedTicket.description,
       status: TicketStatus.OPEN,
+      priority: seedTicket.priority,
       user: requester,
       agents: assignedAgents,
     } as Partial<Ticket>);
@@ -295,6 +307,7 @@ async function seed() {
       id: ticket.id,
       title: ticket.title,
       status: ticket.status,
+      priority: ticket.priority,
       requesterEmail: ticket.user.email,
       assignedAgentEmails: ticket.agents?.map((agent) => agent.email) ?? [],
     })),
