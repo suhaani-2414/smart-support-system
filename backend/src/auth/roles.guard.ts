@@ -4,29 +4,38 @@ import { ROLES_KEY } from './roles.decorator';
 import { Role } from '../users/enums/role.enum';
 
 /**
- * Guards routes that are annotated with @Roles(...).
- * Must be used in combination with JwtAuthGuard so req.user is populated.
+ * Enforces the role restrictions declared via @Roles(...). Two design
+ * choices worth knowing:
  *
- * ADMIN bypasses all role restrictions — they have full system access.
+ *   1. It MUST run after JwtAuthGuard. The role check reads req.user.role,
+ *      which is only populated after JWT verification. The standard pattern
+ *      is `@UseGuards(JwtAuthGuard, RolesGuard)` — Nest runs them left-to-right.
+ *
+ *   2. ADMIN bypasses every role check. Simpler than having to add ADMIN
+ *      to every @Roles list, and matches the principle that admins have
+ *      blanket access.
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    // Pulls the @Roles metadata from either the handler or the controller
+    // class — getAllAndOverride lets a handler-level decorator override
+    // a class-level one if both are present.
     const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    // No @Roles decorator — the route is accessible to any authenticated user
+    // Routes without @Roles() are open to any authenticated user.
     if (!requiredRoles || requiredRoles.length === 0) {
       return true;
     }
 
     const { user } = context.switchToHttp().getRequest<{ user: { role: Role } }>();
 
-    // Admin has unrestricted access across the whole system
+    // Admin override — they pass every role check.
     if (user?.role === Role.ADMIN) {
       return true;
     }

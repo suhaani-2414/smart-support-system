@@ -2,8 +2,16 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
 /**
- * Protects routes that require a valid JWT Bearer token.
- * Throws 401 Unauthorized when the token is missing or invalid.
+ * Thin wrapper around Passport's AuthGuard('jwt') that:
+ *
+ *   1. Triggers the JwtStrategy (validates the bearer token).
+ *   2. Customises the failure response — Nest's default would 401 with
+ *      "Unauthorized"; we make it slightly more useful with "Invalid or
+ *      missing access token".
+ *
+ * Apply with @UseGuards(JwtAuthGuard) on any route that requires
+ * authentication. The strategy populates req.user with the validated
+ * payload (see JwtStrategy.validate).
  */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {

@@ -2,21 +2,20 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 /**
- * MailService — sends transactional email via Resend's REST API.
+ * Sends transactional email via Resend's REST API.
  *
- * Why Resend (May 2026):
- * - 3,000 emails/month and 100/day on the forever-free tier, no card required.
- * - Simple REST API; no SMTP, no nodemailer dependency.
- * - For dev you can send from `onboarding@resend.dev` (no domain setup) to
- *   the email address you signed up with. For prod, verify a domain via
- *   DNS at https://resend.com/domains.
+ * Design choices worth knowing:
  *
- * The public interface (`sendRaw` plus the typed wrappers) is unchanged
- * from the nodemailer version, so NotificationsService keeps working
- * without modification.
+ *   - Direct fetch, no SDK. Resend has an official SDK but it's a
+ *     dependency for one HTTP call. Node 20+ ships fetch natively.
  *
- * Email failures are LOGGED, not thrown. Business flows (signup, approval,
- * ticket events) must never break because of a delivery failure.
+ *   - Failures never throw. Every method catches and logs. The whole
+ *     notification flow is fire-and-forget from the business code's
+ *     perspective — a Resend outage must not break ticket creation.
+ *
+ *   - Degrades gracefully without an API key. If RESEND_API_KEY isn't
+ *     set, we just log "skipping email" and return — the in-app
+ *     notifications still get written to the DB.
  */
 @Injectable()
 export class MailService implements OnModuleInit {
@@ -38,6 +37,11 @@ export class MailService implements OnModuleInit {
     );
   }
 
+  /**
+   * Nest calls this once after construction. We use it to warn at
+   * startup if the API key is missing, rather than silently doing
+   * nothing — a noisy log is far easier to debug than a missing email.
+   */
   onModuleInit(): void {
     if (!this.apiKey) {
       this.logger.warn(
@@ -49,11 +53,15 @@ export class MailService implements OnModuleInit {
   }
 
   /**
-   * Low-level send. Used by NotificationsService and (legacy) by the typed
-   * wrappers below.
+   * The single low-level send method. Everything else in this service
+   * (and the public API used by NotificationsService) goes through here.
    *
-   * Errors and non-2xx responses are caught and logged; this method never
-   * throws. NotificationsService relies on that contract.
+   * Resend API contract:
+   *   POST https://api.resend.com/emails
+   *   Authorization: Bearer <api-key>
+   *   Body: { from, to: string[], subject, html }
+   *   Success: 200 with { id: "<message-id>" }
+   *   Failure: 4xx with { name, message, statusCode }
    */
   async sendRaw(to: string, subject: string, html: string): Promise<void> {
     if (!this.apiKey) {
@@ -77,6 +85,7 @@ export class MailService implements OnModuleInit {
         }),
       });
     } catch (err) {
+      // Network-level failure (DNS, TCP, etc.). Log and bail.
       this.logger.error(
         `Could not reach Resend → ${to} | ${subject} | ${(err as Error).message}`,
       );
@@ -84,9 +93,12 @@ export class MailService implements OnModuleInit {
     }
 
     if (!response.ok) {
+      // Read the response body for debugging context. Truncated to
+      // 300 chars so a chatty error doesn't fill the log.
       const body = await response.text().catch(() => '');
-      // 422 from Resend usually means an unverified domain or a malformed
-      // address. 401/403 means the key is wrong. 429 means rate-limited.
+      // 422 = unverified domain or malformed address (most common in dev)
+      // 401/403 = wrong API key
+      // 429 = rate limited
       this.logger.error(
         `Resend rejected message → ${to} | ${subject} | ` +
           `status=${response.status} body=${body.slice(0, 300)}`,
@@ -94,21 +106,23 @@ export class MailService implements OnModuleInit {
       return;
     }
 
+    // Success path: pull the Resend message id for the log line. This
+    // is helpful for cross-referencing with Resend's own dashboard.
     let id = '?';
     try {
       const data = (await response.json()) as { id?: string };
       if (data?.id) id = data.id;
     } catch {
-      // Non-fatal — we'll just log without an id
+      // Body wasn't valid JSON — non-fatal, just skip the id.
     }
 
     this.logger.log(`Email sent → ${to} | ${subject} | resend_id=${id}`);
   }
 
   // ---------------------------------------------------------------------------
-  // Typed wrappers — kept for backwards compatibility with any code path that
-  // hasn't migrated to NotificationsService yet. Each builds the HTML body
-  // and delegates to sendRaw().
+  // Typed convenience wrappers. NotificationsService is the primary user of
+  // sendRaw above, but these stick around in case other code wants to email
+  // someone without going through the full notification pipeline.
   // ---------------------------------------------------------------------------
 
   async sendAccountCreated(name: string, email: string): Promise<void> {
