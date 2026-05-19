@@ -1,20 +1,18 @@
 # Render Blueprint for Smart Support System
 #
-# Deploys three things wired together:
-#   1. PostgreSQL database (free tier — 30-day expiry, see DEPLOYMENT.md)
-#   2. NestJS backend as a Web Service on Node (free tier — sleeps after 15 min idle)
-#   3. Vite-built React frontend as a Static Site (always free, never sleeps)
+# Deploys the full stack in one shot:
+#   1. PostgreSQL database (free tier)
+#   2. NestJS backend as a Web Service on Node (free tier)
+#   3. Vite-built React frontend as a Static Site (always free)
 #
-# Render provides HTTPS automatically for both services. The backend
-# listens plain HTTP inside its container; Render's edge terminates TLS.
+# Render terminates HTTPS at its edge for both services — the backend
+# container speaks plain HTTP internally. No cert management needed.
 #
-# Build commands use `--include=dev`. Render exposes NODE_ENV=production
-# to the BUILD process as well as the runtime, and when NODE_ENV is
-# production npm skips devDependencies by default. NestJS keeps the
-# `nest` CLI binary in devDependencies, and Vite keeps `vite` in
-# devDependencies — so without --include=dev both builds fail with
-# "command not found". The flag is build-only; the runtime container
-# still respects NODE_ENV=production everywhere else.
+# Build commands use `npm ci --include=dev` because Render sets
+# NODE_ENV=production at build time, which makes npm skip devDependencies
+# by default. The Nest CLI (`nest`) and Vite (`vite`) both live in
+# devDependencies. `--include=dev` overrides that for the install step
+# only — the runtime container still respects NODE_ENV=production.
 
 databases:
   - name: smart-support-db
@@ -31,21 +29,28 @@ services:
     plan: free
     buildCommand: npm ci --include=dev && npm run build
     startCommand: node dist/main
+    # Render hits this URL periodically as a liveness check. We don't
+    # have a dedicated /health route, but the global prefix means
+    # GET /api/v1 returns 404 with a JSON body — Render counts that as
+    # alive (only 5xx is "dead").
     healthCheckPath: /api/v1
     envVars:
       - key: NODE_ENV
         value: production
 
+      # Render injects the internal Postgres connection string from
+      # the database resource above.
       - key: DATABASE_URL
         fromDatabase:
           name: smart-support-db
           property: connectionString
 
+      # Internal Render Postgres connections don't need SSL.
       - key: DB_SSL
         value: "false"
 
-      # FIRST DEPLOY ONLY: set true so TypeORM creates the schema.
-      # After tables exist, change to "false" in the dashboard.
+      # FIRST DEPLOY ONLY: lets TypeORM create the schema.
+      # After tables exist, change this to "false" in the dashboard.
       - key: DB_SYNCHRONIZE
         value: "true"
 
@@ -54,9 +59,13 @@ services:
       - key: JWT_EXPIRES_IN
         value: 8h
 
+      # Must match the frontend's actual deployed URL. If you renamed
+      # the frontend service (or Render appended a -xxxx suffix because
+      # the name was taken), update this in the dashboard.
       - key: CORS_ORIGINS
         value: https://smart-support-frontend.onrender.com
 
+      # Secrets — set these in the dashboard after first deploy.
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
@@ -70,17 +79,23 @@ services:
         value: https://router.huggingface.co/v1/chat/completions
 
   # ── Frontend ──────────────────────────────────────────────────────────
-  # NOTE: no `plan` field. Static sites are always free on Render.
+  # No `plan` field — static sites are always free on Render and the
+  # validator rejects `plan: free` on them.
   - type: web
     name: smart-support-frontend
     runtime: static
     rootDir: frontend
     buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: ./dist
+    # SPA fallback. Also backed by frontend/public/_redirects for
+    # belt-and-braces support.
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
     envVars:
+      # Must match the backend's actual deployed URL with /api/v1 appended.
+      # Vite bakes this into the JS at BUILD time — changing it later
+      # requires "Clear build cache & deploy" to take effect.
       - key: VITE_API_URL
         value: https://smart-support-api.onrender.com/api/v1
