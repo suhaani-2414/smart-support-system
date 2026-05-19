@@ -11,11 +11,6 @@ import { Notification, NotificationType } from './notification.entity';
 import { User } from '../users/user.entity';
 import { MailService } from '../mail/mail.service';
 
-/**
- * Internal type for the private `notify()` helper. Public callers don't
- * see this — they go through the typed `notifyAccountCreated`,
- * `notifyTicketResolved` etc. methods at the bottom.
- */
 type NotifyArgs = {
   recipient: User;
   type: NotificationType;
@@ -26,17 +21,6 @@ type NotifyArgs = {
   link?: string | null;
 };
 
-/**
- * The "unified notification" facade. Every place in the codebase that
- * used to send "just an email" now calls one of the typed notify*
- * methods below, which:
- *
- *   1. Insert a row into the notifications table so it shows up in the
- *      user's bell dropdown.
- *   2. Send the corresponding email via MailService.
- *
- * Single funnel ⇒ the bell and the inbox never go out of sync.
- */
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -47,16 +31,12 @@ export class NotificationsService {
     private readonly mailService: MailService,
   ) {}
 
-  /**
-   * The one private path that all notify* methods funnel through.
-   *
-   * Order matters here: we await the DB save BEFORE firing the email.
-   * The in-app notification is the canonical record of "we tried to
-   * notify the user"; the email is best-effort delivery. If we got the
-   * order reversed and the email succeeded but the DB write failed,
-   * the user would see an email about a notification that's not in
-   * their bell — confusing and hard to debug.
-   */
+  // ---------------------------------------------------------------------------
+  // Core: every "notify" call persists a row AND fires an email.
+  // Email failures are swallowed by MailService — they never block the DB
+  // write or the calling business operation.
+  // ---------------------------------------------------------------------------
+
   private async notify(args: NotifyArgs): Promise<Notification> {
     const entity = this.notificationsRepo.create({
       recipient: args.recipient,
@@ -69,9 +49,7 @@ export class NotificationsService {
 
     const saved = await this.notificationsRepo.save(entity);
 
-    // Fire-and-forget. MailService.sendRaw doesn't throw, but if it
-    // somehow did we'd still want the in-app notification to stand on
-    // its own. The .catch() here is belt-and-braces.
+    // Fire-and-forget the email side. Errors are logged by MailService.
     void this.mailService
       .sendRaw(args.recipient.email, args.emailSubject, args.emailHtml)
       .catch((err) => {
@@ -84,14 +62,10 @@ export class NotificationsService {
   }
 
   // ---------------------------------------------------------------------------
-  // Read API — backs the bell dropdown and the unread badge
+  // Public read API (called by NotificationsController)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Most recent N notifications for the calling user, newest first.
-   * Default limit of 30 keeps the bell dropdown fast even for users
-   * who've accumulated thousands.
-   */
+  /** Most recent notifications for the given user. */
   async findForUser(userId: number, limit = 30): Promise<Notification[]> {
     return this.notificationsRepo.find({
       where: { recipient: { id: userId } },
@@ -100,23 +74,12 @@ export class NotificationsService {
     });
   }
 
-  /**
-   * Used by the bell badge. Polled by the frontend every 30 seconds —
-   * keep this query fast. The composite filter (recipient + isRead=false)
-   * benefits from both indexes declared on the entity.
-   */
   async getUnreadCount(userId: number): Promise<number> {
     return this.notificationsRepo.count({
       where: { recipient: { id: userId }, isRead: false },
     });
   }
 
-  /**
-   * Mark one notification as read. Includes an explicit ownership check:
-   * a user can only update their OWN notifications. The check uses
-   * ForbiddenException to make it clear this is a permissions failure
-   * (not a not-found), which matters when debugging client-side bugs.
-   */
   async markAsRead(notificationId: number, userId: number): Promise<Notification> {
     const notification = await this.notificationsRepo.findOne({
       where: { id: notificationId },
@@ -131,7 +94,6 @@ export class NotificationsService {
       throw new ForbiddenException('You can only update your own notifications');
     }
 
-    // Skip the save if it's already read — saves a round-trip.
     if (!notification.isRead) {
       notification.isRead = true;
       await this.notificationsRepo.save(notification);
@@ -140,11 +102,6 @@ export class NotificationsService {
     return notification;
   }
 
-  /**
-   * Bulk "mark all as read" via a single UPDATE — no need to load and
-   * save each row individually. The empty `affected` fallback handles
-   * the edge case where the user had no unread notifications.
-   */
   async markAllAsRead(userId: number): Promise<{ updated: number }> {
     const result = await this.notificationsRepo.update(
       { recipient: { id: userId }, isRead: false },
@@ -154,9 +111,8 @@ export class NotificationsService {
   }
 
   // ---------------------------------------------------------------------------
-  // Typed trigger methods. Each event type that fires a notification has
-  // exactly one method below — keeps the content in one place rather than
-  // scattered across callers, and makes it trivial to tweak wording.
+  // Trigger points — one method per event type.
+  // Each composes the in-app + email content and delegates to notify().
   // ---------------------------------------------------------------------------
 
   notifyAccountCreated(user: User): Promise<Notification> {

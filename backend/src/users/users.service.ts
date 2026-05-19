@@ -9,11 +9,6 @@ import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { Role } from './enums/role.enum';
 
-/**
- * All read/write operations against the users table. Stays free of HTTP
- * concerns — the controller layer converts the exceptions thrown here
- * (NotFound, BadRequest, Conflict) into matching HTTP status codes.
- */
 @Injectable()
 export class UsersService {
   constructor(
@@ -21,11 +16,7 @@ export class UsersService {
     private readonly usersRepository: Repository<User>,
   ) {}
 
-  /**
-   * Used by the login flow only. The password column is select:false on
-   * the entity, so a plain find() never returns it; we use a query builder
-   * with addSelect() to opt back in for this one query.
-   */
+  /** Find a user by email — includes password hash for auth validation */
   async findByEmailWithPassword(email: string): Promise<User | null> {
     return this.usersRepository
       .createQueryBuilder('user')
@@ -34,10 +25,7 @@ export class UsersService {
       .getOne();
   }
 
-  /**
-   * Lookup by id with the password hash safely excluded. Throws 404
-   * instead of returning null so the caller doesn't have to null-check.
-   */
+  /** Find a user by id (password excluded by default via entity column config) */
   async findById(id: number): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
@@ -46,15 +34,12 @@ export class UsersService {
     return user;
   }
 
-  /** Admin: full user roster, newest first. */
+  /** Find all users — used by admin */
   async findAll(): Promise<User[]> {
     return this.usersRepository.find({ order: { createdAt: 'DESC' } });
   }
 
-  /**
-   * Admin: queue of accounts waiting for approval. Sorted oldest-first
-   * so admins handle the longest-waiting users before newer ones.
-   */
+  /** Admin: list all accounts awaiting approval */
   async findPendingUsers(): Promise<User[]> {
     return this.usersRepository.find({
       where: { isPending: true },
@@ -63,12 +48,8 @@ export class UsersService {
   }
 
   /**
-   * Insert a new user. Password is expected to already be bcrypt-hashed
-   * by AuthService — this service is intentionally ignorant of crypto.
-   *
-   * The unique constraint on email enforces no duplicates at the DB
-   * level too; the manual findOne+throw here just produces a nicer
-   * 409 Conflict than the raw DB error.
+   * Create a new user (password must already be hashed).
+   * All new accounts start as pending and inactive until an admin approves them.
    */
   async create(data: {
     name: string;
@@ -83,25 +64,19 @@ export class UsersService {
       throw new ConflictException('An account with this email already exists');
     }
 
-    // Every new account is gated through admin approval — never trust
-    // signup-side flags. The role from `data` is the requested role
-    // (typically USER); an admin can change it at approval time.
     const user = this.usersRepository.create({
       ...data,
       isPending: true,
-      isActive: false,
+      isActive: false, // becomes true only after admin approval
     });
 
     return this.usersRepository.save(user);
   }
 
   /**
-   * Admin approval flow. Flips both flags atomically and optionally
-   * overrides the role at the same time (so a user who signed up
-   * normally can be promoted straight to AGENT or ADMIN).
-   *
-   * Rejects re-approving an already-approved account so the timeline
-   * stays meaningful.
+   * Admin: approve a pending account.
+   * Optionally change the role before finalising.
+   * Sets isPending=false and isActive=true.
    */
   async approveAccount(id: number, role?: Role): Promise<User> {
     const user = await this.findById(id);
@@ -120,11 +95,7 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  /**
-   * Enable or disable an already-approved account. Different from approval —
-   * this is for "this user left the team, deactivate their access" rather
-   * than the initial onboarding gate.
-   */
+  /** Admin: toggle active/inactive status for an already-approved account */
   async setAccountStatus(id: number, isActive: boolean): Promise<User> {
     const user = await this.findById(id);
 
@@ -138,7 +109,7 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
-  /** Admin: promote/demote a user. No business logic — pure state change. */
+  /** Admin: change a user's role */
   async updateRole(id: number, role: Role): Promise<User> {
     const user = await this.findById(id);
     user.role = role;
